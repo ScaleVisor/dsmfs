@@ -19,6 +19,7 @@ extern int dsmfs_nommu_expand_for_mapping(struct inode *inode, size_t newsize);
 extern const struct file_operations dsmfs_file_operations;
 extern const struct vm_operations_struct generic_file_vm_ops;
 extern int init_dsmfs_fs(void);
+extern int end_dsmfs_fs(void);
 
 int dsmfs_fill_super(struct super_block *sb, void *data, int silent);
 

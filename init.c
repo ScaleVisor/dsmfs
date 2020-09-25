@@ -16,6 +16,7 @@ static int __init dsmfs_init(void) {
 
 static void __exit dsmfs_exit(void) {
 	printk(KERN_INFO "Unloading DSMFS !\n");
+	end_dsmfs_fs();
 }
 
 module_init(dsmfs_init);

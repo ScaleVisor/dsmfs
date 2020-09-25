@@ -44,8 +44,18 @@
 static const struct super_operations dsmfs_ops;
 static const struct inode_operations dsmfs_dir_inode_operations;
 
+static int simple_readpage_wrapper(struct file *file, struct page *page)
+{
+	static struct page* old=NULL;
+	int ret;
+	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", __func__, page, page->index, page->mapping);
+	ret=simple_readpage(file, page);
+	old=page;
+	return ret;
+}
+
 static const struct address_space_operations dsmfs_aops = {
-	.readpage	= simple_readpage,
+	.readpage	= simple_readpage_wrapper,
 	.write_begin	= simple_write_begin,
 	.write_end	= simple_write_end,
 	.set_page_dirty	= __set_page_dirty_no_writeback,
@@ -262,9 +272,10 @@ static struct file_system_type dsmfs_fs_type = {
 
 int init_dsmfs_fs(void)
 {
-	static unsigned long once;
-
-	if (test_and_set_bit(0, &once))
-		return 0;
 	return register_filesystem(&dsmfs_fs_type);
+}
+
+int end_dsmfs_fs(void)
+{
+	return unregister_filesystem(&dsmfs_fs_type);
 }
