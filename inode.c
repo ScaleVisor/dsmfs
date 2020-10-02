@@ -46,11 +46,11 @@ static const struct inode_operations dsmfs_dir_inode_operations;
 
 static int simple_readpage_wrapper(struct file *file, struct page *page)
 {
-	static struct page* old=NULL;
 	int ret;
 	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", __func__, page, page->index, page->mapping);
 	ret=simple_readpage(file, page);
-	old=page;
+	SetPageDsmValid(page);
+	page->dsm_copyset = 0;
 	return ret;
 }
 

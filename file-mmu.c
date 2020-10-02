@@ -44,10 +44,58 @@ int dsmfs_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
+
+static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	pgoff_t offset = vmf->pgoff;
+	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
+	dump_stack();
+	return filemap_fault(vma, vmf);
+}
+
+static void filemap_map_pages_wrapper(struct fault_env *fe,
+				pgoff_t start_pgoff, pgoff_t end_pgoff)
+{
+	printk(KERN_INFO "DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
+	dump_stack();
+	filemap_map_pages(fe, start_pgoff, end_pgoff);
+}
+
+static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	pgoff_t offset = vmf->page->index*PAGE_SIZE;
+	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
+	dump_stack();
+	return filemap_page_mkwrite(vma, vmf);
+
+}
+
+const struct vm_operations_struct dsmfs_file_vm_ops = {
+	.fault		= filemap_fault_wrapper,
+	.map_pages	= filemap_map_pages_wrapper,
+	.page_mkwrite	= filemap_page_mkwrite_wrapper,
+};
+
+/*
+ * set up a mapping for shared memory segments
+ */
+static int dsmfs_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct address_space *mapping = file->f_mapping;
+
+	if (!mapping->a_ops->readpage)
+		return -ENOEXEC;
+	file_accessed(file);
+	vma->vm_ops = &dsmfs_file_vm_ops;
+	//vma->vm_ops = &dsmfs_file_vm_ops;
+	return 0;
+}
+
 const struct file_operations dsmfs_file_operations = {
 	.read_iter	= generic_file_read_iter,
 	.write_iter	= generic_file_write_iter,
-	.mmap		= generic_file_mmap,
+	.mmap		= dsmfs_mmap,
+	//.mmap		= generic_file_mmap,
 	.fsync		= noop_fsync,
 	.splice_read	= generic_file_splice_read,
 	.splice_write	= iter_file_splice_write,
