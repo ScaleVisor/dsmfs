@@ -44,10 +44,40 @@
 static const struct super_operations dsmfs_ops;
 static const struct inode_operations dsmfs_dir_inode_operations;
 
+struct dsmfs_mount_opts {
+	umode_t mode;
+};
+
+enum {
+	Opt_mode,
+	Opt_port,
+	Opt_ip,
+	Opt_id,
+	Opt_err
+};
+
+static const match_table_t tokens = {
+	{Opt_mode, "mode=%o"},
+	{Opt_port, "port:%i" },
+	{Opt_ip, "ip:%s" },
+	{Opt_id, "id:%s" },
+	{Opt_err, NULL}
+};
+
+struct dsmfs_fs_info {
+	int ino_gen;
+	short lport;//is the port
+	#define IP_MAX_SIZE 45
+	char rip[IP_MAX_SIZE];// remote ip (we need a list)
+	short rport;// remote port (we need a list)
+	struct dsmfs_mount_opts mount_opts;
+};
+
 static int simple_readpage_wrapper(struct file *file, struct page *page)
 {
 	int ret;
-	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", __func__, page, page->index, page->mapping);
+	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", 
+				__func__, page, page->index, page->mapping);
 	ret=simple_readpage(file, page);
 	SetPageDsmValid(page);
 	page->dsm_copyset = 0;
@@ -62,6 +92,11 @@ static const struct address_space_operations dsmfs_aops = {
 };
 extern const struct inode_operations dsmfs_file_inode_operations;
 
+static int dsmfs_get_next_ino(struct super_block *sb)
+{
+	return ((struct dsmfs_fs_info*)sb->s_fs_info)->ino_gen++;
+}
+
 struct inode *dsmfs_get_inode(struct super_block *sb,
 				const struct inode *dir, umode_t mode, dev_t dev)
 {
@@ -69,7 +104,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 	printk(KERN_INFO "%s DSMFS !\n", __func__);
 
 	if (inode) {
-		inode->i_ino = get_next_ino();
+		inode->i_ino = dsmfs_get_next_ino(sb);//get_next_ino();
 		inode_init_owner(inode, dir, mode);
 		inode->i_mapping->a_ops = &dsmfs_aops;
 		mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
@@ -108,7 +143,7 @@ dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode * inode = dsmfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
-	printk(KERN_INFO "%s DSMFS !\n", __func__);
+	printk(KERN_INFO "%s DSMFS %s:%ld !\n", __func__, dentry->d_name.name, inode->i_ino);
 
 	if (inode) {
 		d_instantiate(dentry, inode);
@@ -169,31 +204,16 @@ static const struct super_operations dsmfs_ops = {
 	.show_options	= generic_show_options,
 };
 
-struct dsmfs_mount_opts {
-	umode_t mode;
-};
 
-enum {
-	Opt_mode,
-	Opt_err
-};
-
-static const match_table_t tokens = {
-	{Opt_mode, "mode=%o"},
-	{Opt_err, NULL}
-};
-
-struct dsmfs_fs_info {
-	struct dsmfs_mount_opts mount_opts;
-};
-
-static int dsmfs_parse_options(char *data, struct dsmfs_mount_opts *opts)
+static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 {
+	struct dsmfs_mount_opts *opts;
 	substring_t args[MAX_OPT_ARGS];
 	int option;
 	int token;
 	char *p;
 
+	opts = &fsi->mount_opts;
 	opts->mode = DSMFS_DEFAULT_MODE;
 
 	while ((p = strsep(&data, ",")) != NULL) {
@@ -207,6 +227,26 @@ static int dsmfs_parse_options(char *data, struct dsmfs_mount_opts *opts)
 				return -EINVAL;
 			opts->mode = option & S_IALLUGO;
 			break;
+		case Opt_port:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			fsi->lport = (short) option;
+			printk(KERN_INFO "%s PORT of the central manager: %d\n", 
+								__func__, fsi->rport);
+			break;
+		case Opt_id:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			fsi->lport = (short) option;
+			printk(KERN_INFO "%s port of the current manager: %d\n", 
+								__func__, fsi->lport);
+			break;
+		case Opt_ip:
+			printk(KERN_INFO "%s IP of central manager pinned to localhost (FIXME)\n", __func__);
+			//strcpy(fsi->ip, &args[0]);
+			//printk(KERN_INFO "%s IP of the central manager: %s\n", 
+								//__func__, fsi->ip);
+			break;
 		/*
 		 * We might like to report bad mount options here;
 		 * but traditionally dsmfs has ignored all mount options,
@@ -219,22 +259,29 @@ static int dsmfs_parse_options(char *data, struct dsmfs_mount_opts *opts)
 	return 0;
 }
 
+int dsmfs_server_init(int server_id, int central_port, char* central_ip);
+
 int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct dsmfs_fs_info *fsi;
 	struct inode *inode;
-	int err;
+	int err = 0;
 
 	save_mount_options(sb, data);
 
+	// Also allocates the inode number
 	fsi = kzalloc(sizeof(struct dsmfs_fs_info), GFP_KERNEL);
 	sb->s_fs_info = fsi;
 	if (!fsi)
 		return -ENOMEM;
 
-	err = dsmfs_parse_options(data, &fsi->mount_opts);
+	err = dsmfs_parse_options(data, fsi);
 	if (err)
-		return err;
+		goto exit_err;
+
+	err = dsmfs_server_init(fsi->lport, fsi->rport, NULL);
+	if (err)
+		goto exit_err;
 
 	sb->s_maxbytes		= MAX_LFS_FILESIZE;
 	sb->s_blocksize		= PAGE_SIZE;
@@ -248,7 +295,11 @@ int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (!sb->s_root)
 		return -ENOMEM;
 
+
 	return 0;
+exit_err:
+	kfree(fsi);
+	return err;
 }
 
 struct dentry *dsmfs_mount(struct file_system_type *fs_type,

@@ -1,6 +1,8 @@
 #ifndef _LINUX_DSMFS_H
 #define _LINUX_DSMFS_H
 
+#include <linux/fs.h>
+
 struct inode *dsmfs_get_inode(struct super_block *sb, const struct inode *dir,
 	 umode_t mode, dev_t dev);
 extern struct dentry *dsmfs_mount(struct file_system_type *fs_type,
