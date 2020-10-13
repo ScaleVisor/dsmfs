@@ -27,12 +27,7 @@
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
 
-/*
- * PG_dsmfs_valid: ...
- * PG_dsmfs_write: set during mkwrite; unset: server receive reads or invalidate!
- */
-
-static int default_node = 0;
+static int main_node = 0;
 
 void print_request(dsm_request_t *request)
 {
@@ -40,6 +35,72 @@ void print_request(dsm_request_t *request)
 				request->nd_id,  request->tx_id,  request->length, 
 					request->pg_id,  request->req_type,  request->copyset);
 }
+
+void dsmfs_page_iv(struct page *page)
+{
+	/* Set flags to read only */
+	ClearPageDsmValid(page);
+	ClearPageDsmWrite(page);
+}
+
+void dsmfs_page_ro(struct page *page)
+{
+	/* Set flags to read only */
+	SetPageDsmValid(page);
+	ClearPageDsmWrite(page);
+	SetPagePinned(page);
+}
+
+void dsmfs_page_rw(struct page *page)
+{
+	/* Set flags to read only */
+	SetPageDsmValid(page);
+	SetPageDsmWrite(page);
+}
+
+int dsmfs_fill_page(struct inode *inode, struct page *page)
+{
+	dsm_request_t request;
+
+	/* page already locked */
+
+	/* Ask owner for the page and copyset (we become owner) */
+	request.nd_id=page->dsm_prob_owner;
+	request.tx_id=current->pid;
+	request.length=0;//no payload
+	request.ino=inode->number;
+	request.pg_id=page->index;
+	request.req_type=DSM_REQ_READ;
+	print_request(&request);
+
+	/* Send request */
+	dsm_channel_send_request(page->dsm_prob_owner, &request, NULL);
+
+	/* Wait for response */
+	dsm_channel_get_request(server_channel, &request, request.tx_id);
+
+	BUG_ON(request.length!=PAGE_SIZE);
+
+	page->copyset = request.copyset;
+
+	/* Copy payload: should be a after the request structure ? */
+	memcpy(page_to_virt(page), ((char*)request)+sizeof(request), PAGE_SIZE);
+
+	/* Set flags to read only */
+	dsmfs_page_ro(page);
+
+	return 0;
+}
+
+
+
+/**********************************************************************************/
+
+/*
+ * PG_dsmfs_valid: ...
+ * PG_dsmfs_write: set during mkwrite; unset: server receive reads or invalidate!
+ */
+
 
 int drop_write_permission(struct page *page)
 {
@@ -66,28 +127,26 @@ int __handle_read(dsm_request_t *request, struct page* page, dsm_channel_t *chan
 {
 	page->dsm_copyset |= channel->id; 
 
-	if(page->flags&PG_dsmfs_write)
+	/* We must be owner and so have a valid page */
+	BUG_ON(PageDsmValid(page));//!handle first time page case!!!!!
+
+	if(PageDsmWrite(page))
 	{
 		drop_write_permission(page);
 	}
 
 	//set flag to read only
-	page->flags|=PG_dsmfs_valid;
-	page->flags^=PG_dsmfs_write;
+	dsmfs_page_ro(page);
 	return 0;
 }
 
 int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *channel)
 {
 
-	if(page->flags&PG_dsmfs_write)
-	{
-		drop_all_permission(page);
-	}
+	drop_all_permission(page);
 
-	//set flag to read only
-	page->flags^=PG_dsmfs_valid;
-	page->flags^=PG_dsmfs_write;
+	//set flag to invalid
+	dsmfs_page_iv(page);
 	return 0;
 }
 
@@ -110,6 +169,16 @@ void dsm_release_page(struct page *page)
 
 int is_owner(dsm_channel_t *channel, struct page *page)
 {
+	/*
+	 * We are also owner for the first time a page
+	 * is loaded and we are the node main_node(0).
+	 * is 'dsm_prob_owner' set to '0' the first
+	 * arround ? We assume yes! (TO BE CHECKED!!!)
+	 * For the other times, since we pin the pages
+	 * the sate of dsm_prob_owner should be corre-
+	 * -ctly set.
+	 */
+
 	return channel->id == page->dsm_prob_owner;
 }
 
@@ -121,13 +190,12 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	print_request(request);
 
 	if(!page)
-		forward_request(request, default_node);
+		forward_request(request, main_node);
 
 	if(request->req_type == DSM_REQ_INVALIDATE)
 	{
 		drop_all_permission(page);
-		page->flags^=PG_dsmfs_valid;
-		page->flags^=PG_dsmfs_write;
+		dsmfs_page_iv(page);
 		send_response(request, NULL);
 	}else
 	{ 	
@@ -165,7 +233,7 @@ int dsm_server_threadfn(void *data)
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request);
+		dsm_channel_get_request(server_channel, &request, -1);
 		handle_request(&request, server_channel);
 	}
 	

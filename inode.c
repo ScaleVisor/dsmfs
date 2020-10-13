@@ -78,6 +78,7 @@ static int simple_readpage_wrapper(struct file *file, struct page *page)
 	int ret;
 	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", 
 				__func__, page, page->index, page->mapping);
+	dsmfs_fill_page(page->mapping->host, page);
 	ret=simple_readpage(file, page);
 	SetPageDsmValid(page);
 	page->dsm_copyset = 0;

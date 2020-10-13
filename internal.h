@@ -11,3 +11,4 @@
 
 
 extern const struct inode_operations ramfs_file_inode_operations;
+int dsmfs_fill_page(struct inode *inode, struct page *page);
