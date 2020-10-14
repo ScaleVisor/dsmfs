@@ -12,8 +12,6 @@
 #include <linux/mm.h>
 #include "channel.h"
 
-
-
 struct dsmfs_mount_opts {
 	umode_t mode;
 };
