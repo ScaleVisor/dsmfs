@@ -4,7 +4,7 @@
 
 
 obj-m += dsmfs.o 
-dsmfs-objs += init.o file-mmu.o inode.o server.o channel.o
+dsmfs-objs += init.o file-mmu.o inode.o channel.o dsm.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
