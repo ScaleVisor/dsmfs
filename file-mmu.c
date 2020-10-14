@@ -63,10 +63,20 @@ static void filemap_map_pages_wrapper(struct fault_env *fe,
 
 static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	pgoff_t offset = vmf->page->index*PAGE_SIZE;
+	int ret;
+	struct page *page = vmf->page;
+	pgoff_t offset = page->index*PAGE_SIZE;
+	struct inode *inode = file_inode(vma->vm_file);
+
 	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
 	dump_stack();
-	return filemap_page_mkwrite(vma, vmf);
+
+
+	ret=filemap_page_mkwrite(vma, vmf);
+	if(!ret)
+		dsmfs_upgrade_page(inode, page);
+
+	return ret;
 
 }
 

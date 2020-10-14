@@ -44,9 +44,6 @@
 static const struct super_operations dsmfs_ops;
 static const struct inode_operations dsmfs_dir_inode_operations;
 
-struct dsmfs_mount_opts {
-	umode_t mode;
-};
 
 enum {
 	Opt_mode,
@@ -64,14 +61,6 @@ static const match_table_t tokens = {
 	{Opt_err, NULL}
 };
 
-struct dsmfs_fs_info {
-	int ino_gen;
-	short lport;//is the port
-	#define IP_MAX_SIZE 45
-	char rip[IP_MAX_SIZE];// remote ip (we need a list)
-	short rport;// remote port (we need a list)
-	struct dsmfs_mount_opts mount_opts;
-};
 
 static int simple_readpage_wrapper(struct file *file, struct page *page)
 {
@@ -228,19 +217,19 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 				return -EINVAL;
 			opts->mode = option & S_IALLUGO;
 			break;
-		case Opt_port:
-			if (match_int(&args[0], &option))
-				return -EINVAL;
-			fsi->lport = (short) option;
-			printk(KERN_INFO "%s PORT of the central manager: %d\n", 
-								__func__, fsi->rport);
-			break;
 		case Opt_id:
 			if (match_int(&args[0], &option))
 				return -EINVAL;
-			fsi->lport = (short) option;
+			fsi->server_id = (int) option;
 			printk(KERN_INFO "%s port of the current manager: %d\n", 
-								__func__, fsi->lport);
+								__func__, fsi->server_id);
+			break;
+		case Opt_port:
+			if (match_int(&args[0], &option))
+				return -EINVAL;
+			fsi->rport = (short) option;
+			printk(KERN_INFO "%s PORT of the central manager: %d\n", 
+								__func__, fsi->rport);
 			break;
 		case Opt_ip:
 			printk(KERN_INFO "%s IP of central manager pinned to localhost (FIXME)\n", __func__);
@@ -260,7 +249,7 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 	return 0;
 }
 
-int dsmfs_server_init(int server_id, int central_port, char* central_ip);
+int dsmfs_server_init(int server_id, struct super_block *sb,  char* central_ip, int central_port);
 
 int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 {
@@ -280,7 +269,7 @@ int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (err)
 		goto exit_err;
 
-	err = dsmfs_server_init(fsi->lport, fsi->rport, NULL);
+	err = dsmfs_server_init(fsi->server_id, sb, fsi->rip, fsi->rport);
 	if (err)
 		goto exit_err;
 

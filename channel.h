@@ -51,4 +51,4 @@ dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int cen
 
 int dsm_channel_send_request(int target_node, dsm_request_t* request, void* payload);
 
-int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t* request);
+int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id);

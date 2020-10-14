@@ -9,6 +9,30 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <linux/mm.h>
+#include "channel.h"
+
+
+
+struct dsmfs_mount_opts {
+	umode_t mode;
+};
+
+struct dsmfs_fs_info {
+	int ino_gen;
+	int server_id;//is the port
+	#define IP_MAX_SIZE 45
+	char rip[IP_MAX_SIZE];// remote ip (we need a list)
+	short rport;// remote port (we need a list)
+	dsm_channel_t * server_channel;
+	struct dsmfs_mount_opts mount_opts;
+};
 
 extern const struct inode_operations ramfs_file_inode_operations;
+
 int dsmfs_fill_page(struct inode *inode, struct page *page);
+
+int dsmfs_upgrade_page(struct inode *inode, struct page *page);
+
+int dsmfs_server_init(int server_id, struct super_block *sb,
+				char* central_ip, int central_port);

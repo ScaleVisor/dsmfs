@@ -14,8 +14,9 @@ dsm_channel_t* dsm_channel_create(int server_id,
 	return server_channel;
 }
 
-int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t* request)
+int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id)
 {
+	*request=NULL;
 	return -1;
 }
 

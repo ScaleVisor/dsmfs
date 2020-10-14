@@ -21,13 +21,18 @@
  */
 
 #include "channel.h"
+#include "internal.h"
 #include "util.h"
 #include <linux/mm.h>
+#include <linux/string.h>
 #include <linux/rmap.h>
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
 
 static int main_node = 0;
+	
+#define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
+#define i_get_server_channel(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_channel)
 
 void print_request(dsm_request_t *request)
 {
@@ -60,15 +65,17 @@ void dsmfs_page_rw(struct page *page)
 
 int dsmfs_fill_page(struct inode *inode, struct page *page)
 {
+	void *dest;
 	dsm_request_t request;
+	dsm_request_t *response;
 
 	/* page already locked */
 
 	/* Ask owner for the page and copyset (we become owner) */
-	request.nd_id=page->dsm_prob_owner;
+	request.nd_id=i_get_server_id(inode);
 	request.tx_id=current->pid;
 	request.length=0;//no payload
-	request.ino=inode->number;
+	request.ino=inode->i_ino;
 	request.pg_id=page->index;
 	request.req_type=DSM_REQ_READ;
 	print_request(&request);
@@ -77,21 +84,109 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	dsm_channel_send_request(page->dsm_prob_owner, &request, NULL);
 
 	/* Wait for response */
-	dsm_channel_get_request(server_channel, &request, request.tx_id);
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
 
 	BUG_ON(request.length!=PAGE_SIZE);
 
-	page->copyset = request.copyset;
+	/* copy copyset */
+	page->dsm_copyset = request.copyset;
+
+	dest = page_to_virt(page);
 
 	/* Copy payload: should be a after the request structure ? */
-	memcpy(page_to_virt(page), ((char*)request)+sizeof(request), PAGE_SIZE);
+	memcpy(dest, (const void*)(((char*)response)+sizeof(*response)), PAGE_SIZE);
 
 	/* Set flags to read only */
 	dsmfs_page_ro(page);
 
+	/* We are the new owner */
+	//page->dsm_prob_owner = inode->i_server_id;
+	request.nd_id=i_get_server_id(inode);
+
 	return 0;
 }
 
+static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
+{
+	copyset_t cs = page->dsm_copyset;
+	dsm_request_t request;
+	dsm_request_t *response;
+	int i;
+
+	/* page already locked */
+
+	/* Ask owner for the page and copyset (we become owner) */
+	//request.nd_id=inode->i_server_id;
+	request.nd_id=i_get_server_id(inode);
+	request.tx_id=current->pid;
+	request.length=0;//no payload
+	request.ino=inode->i_ino;
+	request.pg_id=page->index;
+	request.req_type=DSM_REQ_INVALIDATE;
+	print_request(&request);
+
+
+	for(i=0; i<sizeof(cs); i++)
+	{
+		if(i == i_get_server_id(inode))
+			continue; //don't invalidate local page
+
+		if(cs & (1<<i))
+		{
+			/* Send request */
+			dsm_channel_send_request(page->dsm_prob_owner, &request, NULL);
+
+			/* Wait for response */
+			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+		}
+	}
+
+	return 0;
+}
+
+int dsmfs_upgrade_page(struct inode *inode, struct page *page)
+{
+	dsm_request_t request;
+	dsm_request_t *response;
+
+	/* page already locked */
+
+	/* Ask owner for the page and copyset (we become owner) */
+	request.nd_id=page->dsm_prob_owner;
+	request.tx_id=current->pid;
+	request.length=0;//no payload
+	request.ino=inode->i_ino;
+	request.pg_id=page->index;
+	/* TODO: sometimes we don't need the page content, create a new request */
+	request.req_type=DSM_REQ_WRITE;
+	print_request(&request);
+
+	/* Send request */
+	dsm_channel_send_request(page->dsm_prob_owner, &request, NULL);
+
+	/* Wait for response */
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+
+	BUG_ON(request.length!=PAGE_SIZE);
+
+	/* copy copyset */
+	page->dsm_copyset = request.copyset;
+
+	/* Copy payload: should be a after the request structure ? */
+	memcpy(page_to_virt(page), ((char*)response)+sizeof(*response), PAGE_SIZE);
+
+	__dsmfs_invalidate_page(inode, page);
+
+	/* Set flags to read only */
+	dsmfs_page_rw(page);
+
+	/* Set prob_owner to local */
+	page->dsm_prob_owner = i_get_server_id(inode);
+
+	return 0;
+
+
+}
 
 
 /**********************************************************************************/
@@ -228,12 +323,13 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 int dsm_server_threadfn(void *data)
 {
 	int ret=0;
-	dsm_channel_t *server_channel=(dsm_channel_t*)data;
 	dsm_request_t request;
+	dsm_request_t *response;
+	dsm_channel_t *server_channel=(dsm_channel_t*)data;
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1);
+		dsm_channel_get_request(server_channel, &response, -1);
 		handle_request(&request, server_channel);
 	}
 	
@@ -241,7 +337,7 @@ int dsm_server_threadfn(void *data)
 }
 
 
-int dsmfs_server_init(int server_id, struct super_block *sb, int central_port, char* central_ip)
+int dsmfs_server_init(int server_id, struct super_block *sb, char* central_ip, int central_port)
 {
 	struct task_struct *thread;
 	dsm_channel_t * server_channel;
@@ -250,7 +346,9 @@ int dsmfs_server_init(int server_id, struct super_block *sb, int central_port, c
 
 	server_channel = dsm_channel_create(server_id, sb, central_port, central_ip);
 
-	//TODO: use a thread pool
+	((struct dsmfs_fs_info*)sb->s_fs_info)->server_channel = server_channel;
+
+	/* TODO: use a thread pool */
 	thread = kthread_run(dsm_server_threadfn, (void*)server_channel, "dsm-server:%d", server_id);
 	if (IS_ERR(thread)) {
 		printk(KERN_ERR "DSMFS  server creation failed\n");
