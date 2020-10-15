@@ -41,7 +41,7 @@ static unsigned long dsmfs_mmu_get_unmapped_area(struct file *file,
 
 int dsmfs_open(struct inode *inode, struct file *file)
 {
-	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, inode->i_ino);  
+	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, inode ? inode->i_ino : -1);
 	return 0;
 }
 
@@ -50,14 +50,14 @@ static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vm
 {
 	pgoff_t offset = vmf->pgoff;
 	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
-	dump_stack();
+	//dump_stack();
 	return filemap_fault(vma, vmf);
 }
 
 static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
 	printk(KERN_INFO "DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
-	dump_stack();
+	//dump_stack();
 	filemap_map_pages(fe, start_pgoff, end_pgoff);
 }
 
@@ -69,7 +69,7 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 	struct inode *inode = file_inode(vma->vm_file);
 
 	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
-	dump_stack();
+	//dump_stack();
 
 
 	ret=filemap_page_mkwrite(vma, vmf);

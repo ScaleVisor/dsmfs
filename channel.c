@@ -164,16 +164,22 @@ dsm_channel_t* dsm_channel_create(int local_id,
 
 int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id)
 {
-	if(tx_id==-1)
-		*request=channel_get_request(server_channel->id);
-	else
-		*request=channel_get_response(server_channel->id, tx_id);
+	do{
+		if(tx_id==-1)
+			*request=channel_get_request(server_channel->id);
+		else
+			*request=channel_get_response(server_channel->id, tx_id);
+	}while(*request==NULL);
+
+	BUG_ON(*request == NULL);
+
 	return 0;
 }
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request, void* payload)
 {
-	request->payload=payload;
+	if(request->length!=0)
+		request->payload=payload;
 	channel_put_request(target_node, server_channel->id, request);
 	return 0;
 }

@@ -55,9 +55,9 @@ enum {
 
 static const match_table_t tokens = {
 	{Opt_mode, "mode=%o"},
-	{Opt_port, "port:%i" },
-	{Opt_ip, "ip:%s" },
-	{Opt_id, "id:%s" },
+	{Opt_port, "port=%i" },
+	{Opt_ip, "ip=%s" },
+	{Opt_id, "id=%s" },
 	{Opt_err, NULL}
 };
 
@@ -65,7 +65,7 @@ static const match_table_t tokens = {
 static int simple_readpage_wrapper(struct file *file, struct page *page)
 {
 	int ret;
-	printk(KERN_INFO "%s page to fill %p, %ld, %p\n", 
+	printk(KERN_INFO "%s DSMFS: page to fill %p, %ld, %p\n", 
 				__func__, page, page->index, page->mapping);
 	dsmfs_fill_page(page->mapping->host, page);
 	ret=simple_readpage(file, page);
@@ -91,7 +91,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 				const struct inode *dir, umode_t mode, dev_t dev)
 {
 	struct inode * inode = new_inode(sb);
-	printk(KERN_INFO "%s DSMFS !\n", __func__);
+	printk(KERN_INFO "%s DSMFS: !\n", __func__);
 
 	if (inode) {
 		inode->i_ino = dsmfs_get_next_ino(sb);//get_next_ino();
@@ -133,7 +133,7 @@ dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode * inode = dsmfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
-	printk(KERN_INFO "%s DSMFS %s:%ld !\n", __func__, dentry->d_name.name, inode->i_ino);
+	printk(KERN_INFO "%s DSMFS: %s:%ld !\n", __func__, dentry->d_name.name, inode->i_ino);
 
 	if (inode) {
 		d_instantiate(dentry, inode);
@@ -221,18 +221,18 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 			if (match_int(&args[0], &option))
 				return -EINVAL;
 			fsi->server_id = (int) option;
-			printk(KERN_INFO "%s port of the current manager: %d\n", 
+			printk(KERN_INFO "%s DSMFS: ID of the current manager: %d\n", 
 								__func__, fsi->server_id);
 			break;
 		case Opt_port:
 			if (match_int(&args[0], &option))
 				return -EINVAL;
 			fsi->rport = (short) option;
-			printk(KERN_INFO "%s PORT of the central manager: %d\n", 
+			printk(KERN_INFO "%s DSMFS: PORT of the central manager: %d\n", 
 								__func__, fsi->rport);
 			break;
 		case Opt_ip:
-			printk(KERN_INFO "%s IP of central manager pinned to localhost (FIXME)\n", __func__);
+			printk(KERN_INFO "%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);
 			//strcpy(fsi->ip, &args[0]);
 			//printk(KERN_INFO "%s IP of the central manager: %s\n", 
 								//__func__, fsi->ip);
