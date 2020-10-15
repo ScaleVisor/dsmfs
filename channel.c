@@ -168,12 +168,12 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 		*request=channel_get_request(server_channel->id);
 	else
 		*request=channel_get_response(server_channel->id, tx_id);
-	return -1;
+	return 0;
 }
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request, void* payload)
 {
 	request->payload=payload;
 	channel_put_request(target_node, server_channel->id, request);
-	return -1;
+	return 0;
 }

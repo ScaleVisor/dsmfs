@@ -24,9 +24,10 @@
  * caches is sufficient.
  */
 
+#include "util.h"
 #include <linux/fs.h>
 #include <linux/mm.h>
-#include "util.h"
+#include <linux/types.h>
 #include <linux/sched.h>
 
 #include "internal.h"
@@ -53,8 +54,7 @@ static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vm
 	return filemap_fault(vma, vmf);
 }
 
-static void filemap_map_pages_wrapper(struct fault_env *fe,
-				pgoff_t start_pgoff, pgoff_t end_pgoff)
+static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
 	printk(KERN_INFO "DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
 	dump_stack();

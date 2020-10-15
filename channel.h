@@ -8,7 +8,8 @@ typedef struct dsm_channel_s{
 	struct super_block *sb;
 }dsm_channel_t;
 
-typedef uint64_t copyset_t;
+//TODO: synchronize with page->dsm_copyset
+typedef uint32_t copyset_t;
 
 /*
 enum dsm_page_access {

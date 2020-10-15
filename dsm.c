@@ -36,7 +36,7 @@ static int main_node = 0;
 
 void print_request(dsm_request_t *request)
 {
-	printk(KERN_INFO "request: node_id %d tx_id %d len %d pg_idx %ld req_type %x copyset %llx\n", 
+	printk(KERN_INFO "request: node_id %d tx_id %d len %d pg_idx %ld req_type %x copyset %x\n", 
 				request->src_id,  request->tx_id,  request->length, 
 					request->pg_id,  request->req_type,  request->copyset);
 }
@@ -172,8 +172,8 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	/* copy copyset */
 	page->dsm_copyset = request.copyset;
 
-	/* Copy payload: should be a after the request structure ? */
-	memcpy(page_to_virt(page), ((char*)response)+sizeof(*response), PAGE_SIZE);
+	/* Copy payload */
+	memcpy(page_to_virt(page), response->payload, PAGE_SIZE);
 
 	__dsmfs_invalidate_page(inode, page);
 
