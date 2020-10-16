@@ -1,6 +1,7 @@
 #include "channel.h"
 #include "internal.h"
 #include <linux/slab.h>
+#include <linux/kthread.h>
 #include <linux/semaphore.h>
 #include <linux/hashtable.h>
 
@@ -13,7 +14,7 @@ static DEFINE_SPINLOCK(dsm_comm_hlock);
 struct dsm_comm_hentry
 {
 	int tgt_id;
-	dsm_request_t* request;
+	dsm_request_t const* request;
 	struct hlist_node hlink;
 };
 
@@ -24,6 +25,7 @@ static void sema_up(int sema_id)
 {
 	if(sema_id == -1)
 		sema_id=MAX_SEMA-1;
+	printk(KERN_INFO "DSMFS: %s: sema %d\n", __func__,  sema_id);
 	up(&dsm_comm_semaphores[sema_id]);
 }
 
@@ -31,10 +33,11 @@ static int sema_down(int sema_id)
 {
 	if(sema_id == -1)
 		sema_id=MAX_SEMA-1;
+	printk(KERN_INFO "DSMFS: %s: sema %d\n", __func__,  sema_id);
 	return down_killable(&dsm_comm_semaphores[sema_id]);
 }
 
-static int channel_put_request(int target_id, int local_id, dsm_request_t* request)
+static int channel_put_request(int target_id, int local_id, dsm_request_t const* request)
 {
  	struct dsm_comm_hentry *entry;
 	entry = kmalloc(sizeof(struct dsm_comm_hentry), GFP_KERNEL);
@@ -53,27 +56,32 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t* reque
 	return 0;
 }
 
-static struct dsm_request_s* channel_get_request(int local_id)
+static const struct dsm_request_s* channel_get_request(int local_id)
 {
 	int ret;
 	int bkt;
 	int found;
-	dsm_request_t* request;
+	const dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
 	found = 0;
 	entry = NULL;
 	request = NULL;
 
+	printk(KERN_INFO "DSMFS: %s: local_id %d sema %d\n", 
+				__func__, local_id, -1);
 	ret=sema_down(-1);
 	if(ret<0)
 		goto out_err;
+
 
 	spin_lock(&dsm_comm_hlock);
 	//hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) sock) {
 	hash_for_each(dsm_comm_htable, bkt, entry, hlink) {
 		request = entry->request;
-		if(entry->tgt_id!=local_id)
+		printk(KERN_INFO "DSMFS: %s: local_id %d tgt_id %d\n", 
+				__func__, local_id, entry->tgt_id);
+		if(entry->tgt_id==local_id)
 		{
 			found=1;
 			break;
@@ -93,27 +101,33 @@ out_err:
 	return request;
 }
 
-static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
+static const struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 {
 	int ret;
 	int found;
-	dsm_request_t* request;
+	const dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
 	found = 0;
 	entry = NULL;
 	request = NULL;
 
+	printk(KERN_INFO "DSMFS: %s: local_id %d sema %d\n", 
+				__func__, local_id, 0);
 	ret=sema_down(0);
 	if(ret<0)
 		goto out_err;
 
 	spin_lock(&dsm_comm_hlock);
+	printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
 	hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) tx_id) {
 	//hash_for_each(dsm_comm_hlock, bkt, entry, hlink) {
+		printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
 		request = entry->request;
-		if(entry->tgt_id==local_id)
+		printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
+		if(request->src_id==local_id)
 		{
+			printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
 			found=1;
 			break;
 		}
@@ -162,24 +176,36 @@ dsm_channel_t* dsm_channel_create(int local_id,
 	return server_channel;
 }
 
-int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id)
+int dsm_channel_get_request(dsm_channel_t* server_channel, const dsm_request_t** request, int tx_id)
 {
+	const dsm_request_t * ret=NULL;
 	do{
-		if(tx_id==-1)
-			*request=channel_get_request(server_channel->id);
-		else
-			*request=channel_get_response(server_channel->id, tx_id);
-	}while(*request==NULL);
+#if 0
+		if(kthread_should_stop());
+		{
+			printk(KERN_INFO "DSMFS: %s: kthread_stop server_id %d tx_id %d\n", 
+				__func__, server_channel->id, tx_id);
+			
+			break;
+		}
 
-	BUG_ON(*request == NULL);
+#endif
+		printk(KERN_INFO "DSMFS: %s: server_id %d tx_id %d\n", 
+				__func__, server_channel->id, tx_id);
+
+		if(tx_id==-1)
+			ret=channel_get_request(server_channel->id);
+		else
+			ret=channel_get_response(server_channel->id, tx_id);
+	}while(ret==NULL); 
+
+	*request=ret;
 
 	return 0;
 }
 
-int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request, void* payload)
+int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, const dsm_request_t* request)
 {
-	if(request->length!=0)
-		request->payload=payload;
 	channel_put_request(target_node, server_channel->id, request);
 	return 0;
 }

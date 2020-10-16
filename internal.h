@@ -23,6 +23,7 @@ struct dsmfs_fs_info {
 	char rip[IP_MAX_SIZE];// remote ip (we need a list)
 	short rport;// remote port (we need a list)
 	dsm_channel_t * server_channel;
+	struct task_struct *thread;//server thread
 	struct dsmfs_mount_opts mount_opts;
 };
 
@@ -32,5 +33,5 @@ int dsmfs_fill_page(struct inode *inode, struct page *page);
 
 int dsmfs_upgrade_page(struct inode *inode, struct page *page);
 
-int dsmfs_server_init(int server_id, struct super_block *sb,
-				char* central_ip, int central_port);
+int dsmfs_server_init(struct super_block *sb);
+void dsmfs_server_destroy(struct dsmfs_fs_info *fsi);

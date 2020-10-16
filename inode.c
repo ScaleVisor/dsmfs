@@ -249,7 +249,7 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 	return 0;
 }
 
-int dsmfs_server_init(int server_id, struct super_block *sb,  char* central_ip, int central_port);
+int dsmfs_server_init(struct super_block *sb);
 
 int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 {
@@ -269,7 +269,7 @@ int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 	if (err)
 		goto exit_err;
 
-	err = dsmfs_server_init(fsi->server_id, sb, fsi->rip, fsi->rport);
+	err = dsmfs_server_init(sb);
 	if (err)
 		goto exit_err;
 
@@ -300,6 +300,7 @@ struct dentry *dsmfs_mount(struct file_system_type *fs_type,
 
 static void dsmfs_kill_sb(struct super_block *sb)
 {
+	dsmfs_server_destroy(sb->s_fs_info);
 	kfree(sb->s_fs_info);
 	kill_litter_super(sb);
 }
