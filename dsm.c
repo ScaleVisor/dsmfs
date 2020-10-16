@@ -30,6 +30,8 @@
 #include <linux/pagemap.h>
 
 static int main_node = 0;
+
+
 	
 #define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
 #define i_get_server_channel(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_channel)
@@ -52,8 +54,8 @@ static int is_owner(dsm_channel_t *channel, struct page *page)
 
 void print_request(const dsm_request_t *request)
 {
-	printk(KERN_INFO "DSMFS: request: node_id %d tx_id %d len %d pg_idx %ld req_type %x copyset %x\n", 
-				request->src_id,  request->tx_id,  request->length, 
+	dsm_debug("request: src_id %d tx_id %d len %d pg_idx %ld req_type %x copyset %x\n", 
+					request->src_id,  request->tx_id,  request->length, 
 					request->pg_id,  request->req_type,  request->copyset);
 	//dump_stack();
 }
@@ -102,10 +104,10 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	/* Send request */
 	dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
 
-	printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
+	dsm_debug("");
 	/* Wait for response */
 	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
-	printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
+	dsm_debug("");
 
 	BUG_ON(response->length!=PAGE_SIZE);
 
@@ -114,10 +116,11 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	dest = page_to_virt(page);
 
-	printk(KERN_INFO "DSMFS: %s:%d dest %p src %p len %d\n", __func__, __LINE__, dest, response->payload, response->length);
+	dsm_debug("dest %p src %p len %d\n", dest, response->payload, response->length);
+
 	/* Copy payload: should be a after the request structure ? */
 	memcpy(dest, (const void*)(response->payload), PAGE_SIZE);
-	printk(KERN_INFO "DSMFS: %s:%d\n", __func__, __LINE__);
+	dsm_debug("");
 
 	/* Set flags to read only */
 	dsmfs_page_ro(page);
@@ -157,9 +160,11 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 
 		if(cs & (1<<i))
 		{
+			dsm_debug("");
 			/* Send request */
 			dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
 
+			dsm_debug("");
 			/* Wait for response */
 			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
 		}
@@ -185,11 +190,14 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	request.req_type=DSM_REQ_WRITE;
 	print_request(&request);
 
+	dsm_debug("");
 	/* Send request */
 	dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
 
+	dsm_debug("");
 	/* Wait for response */
 	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+	dsm_debug("");
 
 	BUG_ON(response->length!=PAGE_SIZE);
 
@@ -358,9 +366,9 @@ int dsm_server_threadfn(void *data)
 		dsm_channel_get_request(server_channel, &request, -1);
 		if(!kthread_should_stop() && request)
 			handle_request(request, server_channel);
-		if(!request)
-			printk(KERN_INFO "DSMFS: %s:%d no request\n", 
-				__func__, server_channel->id);
+		if(!request){
+			dsm_debug();
+		}
 	}
 	
 	return 0;
@@ -383,13 +391,12 @@ int dsmfs_server_init(struct super_block *sb)
 
 	fsi->server_channel = server_channel;
 
-	printk(KERN_INFO "DSMFS: %s: server_id %d server_id2 %d\n", 
-				__func__, server_id, server_channel->id);
+	dsm_debug("%s: server_id %d\n", __func__, server_channel->id);
 
 	/* TODO: use a thread pool */
 	fsi->thread = kthread_run(dsm_server_threadfn, (void*)server_channel, "dsm-server:%d", server_id);
 	if (IS_ERR(fsi->thread)) {
-		printk(KERN_ERR "DSMFS: server creation failed\n");
+		dsm_print("server creation failed\n");
 		return PTR_ERR(fsi->thread);
 	}
 
@@ -399,12 +406,12 @@ int dsmfs_server_init(struct super_block *sb)
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 {
 
-	printk(KERN_INFO "DSMFS: killing server\n");
+	dsm_print("DSMFS: killing server\n");
 	if (fsi->thread)
 	{
 		//TODO: send signal? More thinking on the stopping phase
        		kthread_stop(fsi->thread);
-       		printk(KERN_INFO "DSMFS: Thread stopped");
+		dsm_print("DSMFS: THREAD Stopped\n");
 
 	}
 }

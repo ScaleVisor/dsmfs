@@ -12,6 +12,12 @@
 #include <linux/mm.h>
 #include "channel.h"
 
+#define dsm_debug(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
+		current->pid, __func__, __LINE__, ##__VA_ARGS__)
+
+#define dsm_print(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
+		current->pid, __func__, __LINE__, ##__VA_ARGS__)
+
 struct dsmfs_mount_opts {
 	umode_t mode;
 };
