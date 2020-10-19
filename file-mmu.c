@@ -41,7 +41,11 @@ static unsigned long dsmfs_mmu_get_unmapped_area(struct file *file,
 
 int dsmfs_open(struct inode *inode, struct file *file)
 {
-	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, inode ? inode->i_ino : -1);
+	if(!inode) {
+		dsm_debug("%s no inode %d!\n", __func__, -1);
+	}else {
+		dsm_debug("sb %p inode %p num %ld, size %lld, state %ld!\n", inode->i_sb, inode, inode->i_ino, inode->i_size, inode->i_state);
+	}
 	return 0;
 }
 
@@ -49,14 +53,14 @@ int dsmfs_open(struct inode *inode, struct file *file)
 static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	pgoff_t offset = vmf->pgoff;
-	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
+	dsm_debug("DSMFS: %s %ld!\n", __func__, offset);  
 	//dump_stack();
 	return filemap_fault(vma, vmf);
 }
 
 static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
-	printk(KERN_INFO "DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
+	dsm_debug("DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
 	//dump_stack();
 	filemap_map_pages(fe, start_pgoff, end_pgoff);
 }
@@ -68,12 +72,12 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 	pgoff_t offset = page->index*PAGE_SIZE;
 	struct inode *inode = file_inode(vma->vm_file);
 
-	printk(KERN_INFO "DSMFS: %s %ld!\n", __func__, offset);  
+	dsm_debug("DSMFS: %s %ld!\n", __func__, offset);  
 	//dump_stack();
 
 
 	ret=filemap_page_mkwrite(vma, vmf);
-	if(!ret)
+	if(ret==VM_FAULT_LOCKED)
 		dsmfs_upgrade_page(inode, page);
 
 	return ret;

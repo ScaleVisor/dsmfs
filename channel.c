@@ -14,37 +14,51 @@ static DEFINE_SPINLOCK(dsm_comm_hlock);
 struct dsm_comm_hentry
 {
 	int tgt_id;
-	dsm_request_t const* request;
+	dsm_request_t request;
 	struct hlist_node hlink;
 };
 
-void print_request(const dsm_request_t *request);
+void print_request(dsm_request_t *request);
 
 #define MAX_SEMA 2+1
-struct semaphore dsm_comm_semaphores[MAX_SEMA];
+struct semaphore dsm_request_semaphores[MAX_SEMA];
+struct semaphore dsm_response_semaphores[MAX_SEMA];
 		
-static void sema_up(int sema_id)
+static void sema_up(int sema_id, int response)
 {
-	if(sema_id == -1)
-		sema_id=MAX_SEMA-1;
-	dsm_debug("DSMFS: %s: sema %d\n", __func__,  sema_id);
-	up(&dsm_comm_semaphores[sema_id]);
+	dsm_debug("sema %d is it a response? %d\n", sema_id, response);
+
+	if(response)
+		up(&dsm_response_semaphores[sema_id]);
+	else
+		up(&dsm_request_semaphores[sema_id]);
 }
 
-static int sema_down(int sema_id)
+static int sema_down(int sema_id, int response)
 {
-	if(sema_id == -1)
-		sema_id=MAX_SEMA-1;
-	dsm_debug("DSMFS: %s: sema %d\n", __func__,  sema_id);
-	return down_killable(&dsm_comm_semaphores[sema_id]);
+	dsm_debug("sema %d is it a response? %d\n", sema_id, response);
+
+	if(response)
+		return down_killable(&dsm_response_semaphores[sema_id]);
+	else
+		return down_killable(&dsm_request_semaphores[sema_id]);
 }
 
-static int channel_put_request(int target_id, int local_id, dsm_request_t const* request)
+static int channel_put_request(int target_id, int local_id, dsm_request_t *request)
 {
+	int src_id;
  	struct dsm_comm_hentry *entry;
+
+	src_id = request->src_id;
+
 	entry = kmalloc(sizeof(struct dsm_comm_hentry), GFP_KERNEL);
 	entry->tgt_id = target_id;
-	entry->request = request;
+	entry->request = *request;
+	if(request->length)
+	{
+		entry->request.payload = kmalloc(request->length, GFP_KERNEL);
+		memcpy(entry->request.payload, request->payload, request->length);
+	}
 
 	print_request(request);
 	dsm_debug("");
@@ -53,20 +67,20 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t const*
 	spin_unlock(&dsm_comm_hlock);
 	dsm_debug("");
 
-	if(local_id == request->src_id)	//this is a request
-		sema_up(-1);
-	else				//this is a response
-		sema_up(0);
+	if(local_id == src_id)	//this is a request
+		sema_up(target_id, 0);
+	else			//this is a response
+		sema_up(target_id, 1);
 
 	return 0;
 }
 
-static const struct dsm_request_s* channel_get_request(int local_id)
+static struct dsm_request_s* channel_get_request(int local_id)
 {
 	int ret;
 	int bkt;
 	int found;
-	const dsm_request_t* request;
+	dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
 	found = 0;
@@ -75,7 +89,7 @@ static const struct dsm_request_s* channel_get_request(int local_id)
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, -1);
-	ret=sema_down(-1);
+	ret=sema_down(local_id, 0);
 	if(ret<0)
 		goto out_err;
 
@@ -83,7 +97,7 @@ static const struct dsm_request_s* channel_get_request(int local_id)
 	spin_lock(&dsm_comm_hlock);
 	//hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) sock) {
 	hash_for_each(dsm_comm_htable, bkt, entry, hlink) {
-		request = entry->request;
+		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
 		if(entry->tgt_id==local_id)
@@ -100,17 +114,17 @@ static const struct dsm_request_s* channel_get_request(int local_id)
 	spin_unlock(&dsm_comm_hlock);
 
 	if(!found)
-		return NULL;
+		dsm_print("This should not happens!!!!!!!!!!!!!!!!!!!");
 
 out_err:
 	return request;
 }
 
-static const struct dsm_request_s* channel_get_response(int local_id, int tx_id)
+static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 {
 	int ret;
 	int found;
-	const dsm_request_t* request;
+	dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
 	found = 0;
@@ -119,7 +133,7 @@ static const struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, 0);
-	ret=sema_down(0);
+	ret=sema_down(local_id, 1);
 	if(ret<0)
 		goto out_err;
 
@@ -128,7 +142,7 @@ static const struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 	hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) tx_id) {
 	//hash_for_each(dsm_comm_hlock, bkt, entry, hlink) {
 		dsm_debug("");
-		request = entry->request;
+		request = &entry->request;
 		print_request(request);
 		dsm_debug("");
 		//if(request->src_id==local_id)
@@ -147,7 +161,7 @@ static const struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 	spin_unlock(&dsm_comm_hlock);
 
 	if(!found)
-		return NULL;
+		sema_up(local_id, 1);//the request maybe for another thread
 
 out_err:
 	return request;
@@ -162,7 +176,10 @@ static void dsm_channel_init(int local_id)
 		return;
 		
 	for (i=0; i< MAX_SEMA; i++)
-		sema_init(&dsm_comm_semaphores[i], 0);
+	{
+		sema_init(&dsm_request_semaphores[i], 0);
+		sema_init(&dsm_response_semaphores[i], 0);
+	}
 }
 
 
@@ -183,9 +200,19 @@ dsm_channel_t* dsm_channel_create(int local_id,
 	return server_channel;
 }
 
-int dsm_channel_get_request(dsm_channel_t* server_channel, const dsm_request_t** request, int tx_id)
+void dsm_drop_request(dsm_request_t* request)
 {
-	const dsm_request_t * ret=NULL;
+	struct dsm_comm_hentry *entry=NULL;
+
+	if(request->length)
+		kfree(request->payload);
+	entry = container_of(request, struct dsm_comm_hentry, request);
+	kfree(entry);
+}
+
+int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id)
+{
+	dsm_request_t * ret=NULL;
 	do{
 #if 0
 		if(kthread_should_stop());
@@ -211,7 +238,7 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, const dsm_request_t**
 	return 0;
 }
 
-int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, const dsm_request_t* request)
+int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request)
 {
 	channel_put_request(target_node, server_channel->id, request);
 	return 0;
