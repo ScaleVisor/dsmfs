@@ -4,6 +4,7 @@
 #include <linux/kthread.h>
 #include <linux/semaphore.h>
 #include <linux/hashtable.h>
+#include <linux/jhash.h>
 
 int test;
 
@@ -61,7 +62,15 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t *reque
 	}
 
 	print_request(request);
-	dsm_debug("");
+	print_request(&entry->request);
+	
+	if(request->length)
+	{
+		dsm_debug("hash %d %d\n", jhash(entry->request.payload,entry->request.length,0), jhash(entry->request.payload,entry->request.length,0));
+		dsm_debug("content int0 %d\n", *((int*)(entry->request.payload)));
+		dsm_debug("content int0 %d\n", *((int*)(request->payload)));
+	}
+	//dsm_debug("content int0 %d\n", *((int*)(request->payload)));
 	spin_lock(&dsm_comm_hlock);
 	hash_add(dsm_comm_htable, &entry->hlink, request->tx_id);
 	spin_unlock(&dsm_comm_hlock);
@@ -113,6 +122,9 @@ static struct dsm_request_s* channel_get_request(int local_id)
 		request=NULL;
 	spin_unlock(&dsm_comm_hlock);
 
+	if(found && request->length)
+		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
+
 	if(!found)
 		dsm_print("This should not happens!!!!!!!!!!!!!!!!!!!");
 
@@ -159,6 +171,9 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 	else
 		request=NULL;
 	spin_unlock(&dsm_comm_hlock);
+
+	if(found && request->length)
+		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
 
 	if(!found)
 		sema_up(local_id, 1);//the request maybe for another thread

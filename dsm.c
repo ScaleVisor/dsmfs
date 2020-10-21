@@ -54,9 +54,9 @@ static int is_owner(dsm_channel_t *channel, struct page *page)
 
 void print_request(dsm_request_t *request)
 {
-	dsm_debug("request: %p src_id %d tx_id %d len %d inode %d pg_idx %ld req_type %x copyset %x\n", 
+	dsm_debug("request: %p src_id %d tx_id %d len %d inode %d pg_idx %ld req_type %x pauload %p copyset %x\n", 
 				request, request->src_id,  request->tx_id,  request->length, 
-					request->ino, request->pg_id,  request->req_type,  request->copyset);
+					request->ino, request->pg_id,  request->req_type, request->payload,  request->copyset);
 	//dump_stack();
 }
 
@@ -65,6 +65,7 @@ void dsmfs_page_iv(struct page *page)
 	/* Set flags to read only */
 	ClearPageDsmValid(page);
 	ClearPageDsmWrite(page);
+	dsm_debug("clear both bits %p %ld\n", page, page->index);
 }
 
 void dsmfs_page_ro(struct page *page)
@@ -73,6 +74,7 @@ void dsmfs_page_ro(struct page *page)
 	SetPageDsmValid(page);
 	ClearPageDsmWrite(page);
 	SetPagePinned(page);
+	dsm_debug("RO bits %p %ld\n", page, page->index);
 }
 
 void dsmfs_page_rw(struct page *page)
@@ -80,6 +82,7 @@ void dsmfs_page_rw(struct page *page)
 	/* Set flags to read only */
 	SetPageDsmValid(page);
 	SetPageDsmWrite(page);
+	dsm_debug("RW bits %p %ld\n", page, page->index);
 }
 
 int dsmfs_fill_page(struct inode *inode, struct page *page)
@@ -88,7 +91,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	dsm_request_t *response;
 
 	/* page already locked */
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, page->dsm_copyset);
 
 	/* if we are already owner */
 	if(is_owner(i_get_server_channel(inode), page))
@@ -106,11 +109,11 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	/* Send request */
 	dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
 
-	dsm_debug("");
+	dsm_debug("\n");
 	/* Wait for response */
 	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
 	print_request(response);
-	dsm_debug("");
+	dsm_debug("\n");
 
 	BUG_ON(response->length!=PAGE_SIZE);
 
@@ -121,8 +124,10 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	/* Copy payload: should be a after the request structure ? */
 	dsm_debug("page %p dest %p src %p len %d\n", page, page_to_virt(page), response->payload, response->length);
 	memcpy(page_to_virt(page), (void*)(response->payload), PAGE_SIZE);
-	dsm_debug("");
+	dsm_debug("\n");
 
+	if(response->length)
+		dsm_debug("content int0 %d\n", *((int*)(page_to_virt(page))));
 
 	/* We are the new owner */
 	page->dsm_prob_owner = i_get_server_id(inode); 
@@ -345,13 +350,15 @@ struct page* dsm_get_page_locked(dsm_request_t* request, dsm_channel_t *channel)
 	//struct page * page = find_get_page(mapping, index);
 	//struct page *page = pagecache_get_page(mapping, index, FGP_LOCK | FGP_CREAT, 0);
 	fgp_flags=FGP_LOCK;
-	if(channel->id == main_node)
-		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
 	page = find_get_page_flags(mapping, index, fgp_flags);
-	if(channel->id == main_node)
+
+	//node 0 should force the allocation of a new page
+	if(!page && channel->id == main_node)
 	{
+		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
+		page = find_get_page_flags(mapping, index, fgp_flags);
+		dsmfs_page_ro(page);//default rights
 		BUG_ON(!page);
-		dsmfs_page_ro(page);
 	}
 	BUG_ON(!page);
 	return page;
