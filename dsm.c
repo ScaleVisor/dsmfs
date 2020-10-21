@@ -92,7 +92,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	/* if we are already owner */
 	if(is_owner(i_get_server_channel(inode), page))
-		return 0;
+		goto out;
 
 	/* Ask owner for the page and copyset (we become owner) */
 	request.src_id=i_get_server_id(inode);
@@ -123,18 +123,20 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	memcpy(page_to_virt(page), (void*)(response->payload), PAGE_SIZE);
 	dsm_debug("");
 
-	/* Set flags to read only */
-	dsmfs_page_ro(page);
 
 	/* We are the new owner */
 	page->dsm_prob_owner = i_get_server_id(inode); 
 	//inode->i_server_id;
 	//request.src_id=i_get_server_id(inode);
 
+	/* drop request */
 	dsm_drop_request(response);
 
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+out:
+	/* Set flags to read only */
+	dsmfs_page_ro(page);
 
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
 
 	return 0;
 }
@@ -202,7 +204,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 		goto inval;
 
 	/* Ask owner for the page and copyset (we become owner) */
-	request.src_id=page->dsm_prob_owner;
+	request.src_id=i_get_server_id(inode);
 	request.tx_id=current->pid;
 	request.length=0;//no payload
 	request.ino=inode->i_ino;
@@ -255,10 +257,12 @@ inval:
  */
 
 
+int dsm_page_unmap(struct page *page, int clear_read);
 int drop_write_permission(struct page *page)
 {
 	int ret;
-	ret=try_to_unmap(page, 0);//TODO: remove just write: page_mkclean(page)?
+	ret=dsm_page_unmap(page, 0);
+	//ret=try_to_unmap(page, 0);//TODO: remove just write: page_mkclean(page)?
 	dsm_debug("drop write permissions %ld return %d\n", page->index, ret);
 	return ret;
 }
@@ -266,7 +270,8 @@ int drop_write_permission(struct page *page)
 int drop_all_permission(struct page *page)
 {
 	int ret;
-	ret=try_to_unmap(page, 0);//TODO: check SWAP_SUCCESS!
+	ret=dsm_page_unmap(page, 1);
+	//ret=try_to_unmap(page, 0);//TODO: check SWAP_SUCCESS!
 	dsm_debug("drop all permissions %ld return %d\n", page->index, ret);
 	return ret;
 }
@@ -295,7 +300,7 @@ int __handle_read(dsm_request_t *request, struct page* page, dsm_channel_t *chan
 	page->dsm_copyset |= (1 << channel->id); 
 
 	/* We must be owner and so have a valid page */
-	BUG_ON(PageDsmValid(page));//!handle first time page case!!!!!
+	BUG_ON(!PageDsmValid(page));
 
 	if(PageDsmWrite(page))
 	{
@@ -312,7 +317,7 @@ int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *cha
 
 	dsm_debug("Handle write request\n");
 
-	page->dsm_copyset |= (1 << channel->id); 
+	//page->dsm_copyset |= (1 << channel->id); we are dropping all permissions! no need
 
 	drop_all_permission(page);
 
@@ -324,6 +329,7 @@ int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *cha
 struct page* dsm_get_page_locked(dsm_request_t* request, dsm_channel_t *channel)
 {
 	int index;
+	int fgp_flags;
 	struct page * page;
 	struct inode *inode;
 	struct address_space *mapping;
@@ -338,9 +344,15 @@ struct page* dsm_get_page_locked(dsm_request_t* request, dsm_channel_t *channel)
 	mapping = inode->i_mapping;
 	//struct page * page = find_get_page(mapping, index);
 	//struct page *page = pagecache_get_page(mapping, index, FGP_LOCK | FGP_CREAT, 0);
-	page = find_get_page_flags(mapping,
-						index,
-        					FGP_LOCK | FGP_CREAT);
+	fgp_flags=FGP_LOCK;
+	if(channel->id == main_node)
+		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
+	page = find_get_page_flags(mapping, index, fgp_flags);
+	if(channel->id == main_node)
+	{
+		BUG_ON(!page);
+		dsmfs_page_ro(page);
+	}
 	BUG_ON(!page);
 	return page;
 }
@@ -358,7 +370,10 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	print_request(request);
 
 	if(!page)
+	{
 		forward_request(channel, request, main_node);
+		goto out;
+	}
 
 	if(request->req_type == DSM_REQ_INVALIDATE)
 	{
@@ -393,6 +408,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 		}
 	}
 	dsm_release_page(page);
+out:
 	return ret;
 }
 

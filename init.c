@@ -4,6 +4,7 @@
 #include <linux/fs.h>
 #include <linux/namei.h>
 #include "util.h"
+#include "internal.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("MLK");	
@@ -17,15 +18,14 @@ module_param(path_param, charp, 0);
 
 static int __init dsmfs_init(void) {
 
-	printk(KERN_INFO "Loading DSMFS !\n");
-
+	dsm_print("Loading DSMFS !\n");
 	init_dsmfs_fs();
 
 	return 0;
 }
 
 static void __exit dsmfs_exit(void) {
-	printk(KERN_INFO "Unloading DSMFS !\n");
+	dsm_print("Unloading DSMFS !\n");
 	end_dsmfs_fs();
 }
 

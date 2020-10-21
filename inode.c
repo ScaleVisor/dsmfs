@@ -67,10 +67,8 @@ static int simple_readpage_wrapper(struct file *file, struct page *page)
 	int ret;
 	dsm_debug("%s DSMFS: page to fill %p, %ld, %p\n", 
 				__func__, page, page->index, page->mapping);
-	dsmfs_fill_page(page->mapping->host, page);
+	//dsmfs_fill_page(page->mapping->host, page); moved to fault
 	ret=simple_readpage(file, page);
-	SetPageDsmValid(page);
-	//page->dsm_copyset = 0;
 	return ret;
 }
 
@@ -121,11 +119,14 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 			break;
 		}
 		//TODO: remove inode at destroy?!!!!
+		insert_inode_hash(inode);
+#if 0
 		if (insert_inode_locked(inode) < 0) {
 			dsm_print("error insering inode!!!!!!!!!!!!!!!!!!!!! %p", inode);
 			//err = -EIO;
 			return NULL;//TODO: free inode+ better handling
 		}
+#endif
 	}
 	return inode;
 }
@@ -139,7 +140,7 @@ dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode * inode = dsmfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
-	dsm_debug("%s DSMFS: %s:%ld !\n", __func__, dentry->d_name.name, inode->i_ino);
+	dsm_debug("%s DSMFS: %s:%ld  state %ld !\n", __func__, dentry->d_name.name, inode->i_ino, inode->i_state);
 
 	if (inode) {
 		d_instantiate(dentry, inode);

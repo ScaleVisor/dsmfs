@@ -52,27 +52,29 @@ int dsmfs_open(struct inode *inode, struct file *file)
 
 static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	pgoff_t offset = vmf->pgoff;
-	dsm_debug("DSMFS: %s %ld!\n", __func__, offset);  
+	int ret;
+	struct inode *inode = file_inode(vma->vm_file);
+	dsm_debug("%ld!\n", vmf->pgoff);  
 	//dump_stack();
-	return filemap_fault(vma, vmf);
+	ret=filemap_fault(vma, vmf);
+	dsmfs_fill_page(inode, vmf->page);
+	return ret;
 }
 
 static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
-	dsm_debug("DSMFS: %s %ld %ld!\n", __func__, start_pgoff, end_pgoff);  
+	dsm_debug("%ld %ld!\n", start_pgoff, end_pgoff);  
 	//dump_stack();
-	filemap_map_pages(fe, start_pgoff, end_pgoff);
+	//filemap_map_pages(fe, start_pgoff, end_pgoff);
 }
 
 static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	int ret;
 	struct page *page = vmf->page;
-	pgoff_t offset = page->index*PAGE_SIZE;
 	struct inode *inode = file_inode(vma->vm_file);
 
-	dsm_debug("DSMFS: %s %ld!\n", __func__, offset);  
+	dsm_debug("%ld!\n", page->index*PAGE_SIZE);  
 	//dump_stack();
 
 

@@ -9,11 +9,16 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <linux/sched.h>
 #include <linux/mm.h>
 #include "channel.h"
 
+#if 0
 #define dsm_debug(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
 		current->pid, __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define dsm_debug(fmt, ...) /**/
+#endif
 
 #define dsm_print(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
 		current->pid, __func__, __LINE__, ##__VA_ARGS__)
@@ -40,4 +45,5 @@ int dsmfs_fill_page(struct inode *inode, struct page *page);
 int dsmfs_upgrade_page(struct inode *inode, struct page *page);
 
 int dsmfs_server_init(struct super_block *sb);
+
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi);
