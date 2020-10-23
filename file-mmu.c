@@ -57,16 +57,20 @@ static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vm
 	dsm_debug("%ld!\n", vmf->pgoff);  
 	//dump_stack();
 	ret=filemap_fault(vma, vmf);
-	dsmfs_fill_page(inode, vmf->page);
+	dsm_debug("ret %d page %p!\n", ret, vmf->page);  
+	if(vmf->page)  
+		dsmfs_fill_page(inode, vmf->page);
 	return ret;
 }
 
+#if 0
 static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
 	dsm_debug("%ld %ld!\n", start_pgoff, end_pgoff);  
 	//dump_stack();
 	//filemap_map_pages(fe, start_pgoff, end_pgoff);
 }
+#endif
 
 static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
@@ -88,7 +92,7 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 
 const struct vm_operations_struct dsmfs_file_vm_ops = {
 	.fault		= filemap_fault_wrapper,
-	.map_pages	= filemap_map_pages_wrapper,
+	.map_pages	= NULL, //filemap_map_pages_wrapper,
 	.page_mkwrite	= filemap_page_mkwrite_wrapper,
 };
 

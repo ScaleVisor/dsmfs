@@ -109,7 +109,7 @@ static struct dsm_request_s* channel_get_request(int local_id)
 		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
-		if(entry->tgt_id==local_id)
+		if(entry->tgt_id==local_id && request->src_id != local_id)
 		{
 			found=1;
 			break;
@@ -158,7 +158,7 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 		print_request(request);
 		dsm_debug("");
 		//if(request->src_id==local_id)
-		if(entry->tgt_id==local_id)
+		if(entry->tgt_id==local_id && request->src_id == local_id)
 		{
 			dsm_debug("DSMFS: %s:%d\n", __func__, __LINE__);
 			found=1;

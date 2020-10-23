@@ -16,7 +16,7 @@
 /*
  * Uses 
  * dsm_channel_get_request and dsm_channel_send_request
- * dsm_get_page_locked and dsm_release_page
+ * dsm_get_page and dsm_release_page
  * drop_all_permission and drop_write_permission
  */
 
@@ -73,7 +73,7 @@ void dsmfs_page_ro(struct page *page)
 	/* Set flags to read only */
 	SetPageDsmValid(page);
 	ClearPageDsmWrite(page);
-	SetPagePinned(page);
+	//SetPagePinned(page);
 	dsm_debug("RO bits %p %ld\n", page, page->index);
 }
 
@@ -89,6 +89,9 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 {
 	dsm_request_t request;
 	dsm_request_t *response;
+
+	BUG_ON(!page);
+	BUG_ON(!PageLocked(page));
 
 	/* page already locked */
 	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, page->dsm_copyset);
@@ -130,6 +133,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 		dsm_debug("content int0 %d\n", *((int*)(page_to_virt(page))));
 
 	/* We are the new owner */
+	BUG_ON(!PageLocked(page));
 	page->dsm_prob_owner = i_get_server_id(inode); 
 	//inode->i_server_id;
 	//request.src_id=i_get_server_id(inode);
@@ -156,6 +160,7 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 	/* page already locked */
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
 
+
 	/* Ask owner for the page and copyset (we become owner) */
 	//request.src_id=inode->i_server_id;
 	request.src_id=i_get_server_id(inode);
@@ -167,15 +172,15 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 	print_request(&request);
 
 
-	for(i=0; i<(sizeof(cs)*8); i++)
+	for(i=0; i<(sizeof(cs)*8) && cs; i++, cs>>=1)
 	{
 		dsm_debug("current id is %d, clearing node %d", i_get_server_id(inode), i);
 		if(i == i_get_server_id(inode))
 			continue; //don't invalidate local page
 
-		dsm_debug("cs value %x, testing agaist %x, result %d\n", cs, (1<<i), cs & (1<<i));
+		dsm_debug("cs value %x, result %d\n", cs, cs&1);
 
-		if(cs & (1<<i))
+		if(cs & 1)
 		{
 			dsm_debug("");
 			/* Send request */
@@ -201,7 +206,9 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	response=NULL;
 
 	/* page already locked */
-	dsm_debug("");
+	dsm_debug("\n");
+
+	BUG_ON(!PageLocked(page));
 
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
 	/* if we are already owner */
@@ -245,6 +252,7 @@ inval:
 	dsmfs_page_rw(page);
 
 	/* Set prob_owner to local */
+	BUG_ON(!PageLocked(page));
 	page->dsm_prob_owner = i_get_server_id(inode);
 
 	if(response)
@@ -322,7 +330,7 @@ int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *cha
 
 	dsm_debug("Handle write request\n");
 
-	//page->dsm_copyset |= (1 << channel->id); we are dropping all permissions! no need
+	page->dsm_copyset &= ~(1 << channel->id); //we are dropping all permissions! no need to receive inval
 
 	drop_all_permission(page);
 
@@ -331,7 +339,7 @@ int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *cha
 	return 0;
 }
 
-struct page* dsm_get_page_locked(dsm_request_t* request, dsm_channel_t *channel)
+struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int locked)
 {
 	int index;
 	int fgp_flags;
@@ -344,40 +352,53 @@ struct page* dsm_get_page_locked(dsm_request_t* request, dsm_channel_t *channel)
 
 	index = request->pg_id;
 	inode = iget_locked(channel->sb, request->ino);
-	dsm_debug("sb %p inode %p num %ld, size %lld, state %ld!\n", inode->i_sb, inode, inode->i_ino, inode->i_size, inode->i_state);
+	dsm_debug("sb %p inode %p num %ld, pg_idx %d size %lld, state %ld, locked %d\n", inode->i_sb, inode, inode->i_ino, index, inode->i_size, inode->i_state, locked);
 	BUG_ON(inode->i_state & I_NEW);
 	mapping = inode->i_mapping;
 	//struct page * page = find_get_page(mapping, index);
 	//struct page *page = pagecache_get_page(mapping, index, FGP_LOCK | FGP_CREAT, 0);
-	fgp_flags=FGP_LOCK;
+	fgp_flags=0;
+	if(locked)
+		fgp_flags=FGP_LOCK;
 	page = find_get_page_flags(mapping, index, fgp_flags);
 
 	//node 0 should force the allocation of a new page
 	if(!page && channel->id == main_node)
 	{
+		BUG_ON(!locked);
 		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
 		page = find_get_page_flags(mapping, index, fgp_flags);
-		dsmfs_page_ro(page);//default rights
 		BUG_ON(!page);
+		dsmfs_page_ro(page);//default rights
 	}
+	if(locked)
+		dsm_debug("locked page index %d owner %d\n", index, page->dsm_prob_owner);
 	BUG_ON(!page);
 	return page;
 }
 
-void dsm_release_page(struct page *page)
+void dsm_release_page(struct page *page, int locked)
 {
-	unlock_page(page);
+	if(locked)
+	{
+		dsm_debug("unlocked page index %ld owner %d\n", page->index, page->dsm_prob_owner);
+		unlock_page(page);
+	}
 }
 
 int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 {
 	int ret = 0;
-	struct page *page = dsm_get_page_locked(request, channel);
+	int locked = !(request->req_type == DSM_REQ_INVALIDATE);//inval does not lock page
+	struct page *page = dsm_get_page(request, channel, locked);
 
 	print_request(request);
+	
 
 	if(!page)
 	{
+		BUG_ON(request->req_type != DSM_REQ_INVALIDATE);//if we receive an invalidate we must have the page
+		dsm_debug("Forward request type %x\n", request->req_type);
 		forward_request(channel, request, main_node);
 		goto out;
 	}
@@ -385,11 +406,14 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	if(request->req_type == DSM_REQ_INVALIDATE)
 	{
 		dsm_debug("Handle invalidate request %x\n", request->req_type);
+		BUG_ON(is_owner(channel, page));
 		drop_all_permission(page);
 		dsmfs_page_iv(page);
 		dsm_channel_send_request(channel, request->src_id, request);
 	}else
 	{ 	
+		BUG_ON(!PageLocked(page));
+
 		/* read/write */
 		if(is_owner(channel, page))
 		{
@@ -403,18 +427,22 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 			/* send page and copyset */
 			//request->copyset=page->dsm_copyset;
 			/* set probabable owner */
+			BUG_ON(!PageLocked(page));
 			page->dsm_prob_owner = request->src_id;
 			/* send page */
-			send_response(channel, request, page);//FIXME: response allocated on the stack!!!!!!!!!
+			send_response(channel, request, page);
 		}else
 		{
-			/* set probabable owner */
-			page->dsm_prob_owner = request->src_id;
+			dsm_debug("Forward request type %x\n", request->req_type);
+			BUG_ON(page->dsm_prob_owner == request->src_id); /* forward to local node ?*/
 			/* forward request */
 			forward_request(channel, request, page->dsm_prob_owner);
+			/* set probabable owner */
+			BUG_ON(!PageLocked(page));
+			page->dsm_prob_owner = request->src_id;
 		}
 	}
-	dsm_release_page(page);
+	dsm_release_page(page, locked);
 out:
 	return ret;
 }
