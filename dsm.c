@@ -54,7 +54,7 @@ static int is_owner(dsm_channel_t *channel, struct page *page)
 
 void print_request(dsm_request_t *request)
 {
-	dsm_debug("request: %p src_id %d tx_id %d len %d inode %d pg_idx %ld req_type %x pauload %p copyset %x\n", 
+	dsm_debug("request: %p src_id %d tx_id %d len %d inode %d pg_idx %ld req_type %x payload %p copyset %x\n", 
 				request, request->src_id,  request->tx_id,  request->length, 
 					request->ino, request->pg_id,  request->req_type, request->payload,  request->copyset);
 	//dump_stack();

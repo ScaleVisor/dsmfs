@@ -1,5 +1,6 @@
 #include "channel.h"
 #include "internal.h"
+#include <linux/delay.h>
 #include <linux/slab.h>
 #include <linux/kthread.h>
 #include <linux/semaphore.h>
@@ -21,7 +22,7 @@ struct dsm_comm_hentry
 
 void print_request(dsm_request_t *request);
 
-#define MAX_SEMA 2+1
+#define MAX_SEMA 64+1
 struct semaphore dsm_request_semaphores[MAX_SEMA];
 struct semaphore dsm_response_semaphores[MAX_SEMA];
 		
@@ -77,6 +78,8 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t *reque
 	dsm_debug("");
 
 	if(local_id == src_id)	//this is a request
+		sema_up(target_id, 0);
+	else if (target_id != src_id)	//this is a request (forwarded)
 		sema_up(target_id, 0);
 	else			//this is a response
 		sema_up(target_id, 1);
@@ -176,7 +179,10 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
 
 	if(!found)
+	{
 		sema_up(local_id, 1);//the request maybe for another thread
+		msleep(500);//TODO: remove me?
+	}
 
 out_err:
 	return request;

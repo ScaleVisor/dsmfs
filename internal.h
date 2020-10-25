@@ -13,7 +13,7 @@
 #include <linux/mm.h>
 #include "channel.h"
 
-#if 1
+#if 0
 #define dsm_debug(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
 		current->pid, __func__, __LINE__, ##__VA_ARGS__)
 #else
