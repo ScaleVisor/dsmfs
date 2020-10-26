@@ -114,7 +114,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	dsm_debug("\n");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 	print_request(response);
 	dsm_debug("\n");
 
@@ -188,7 +188,7 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 
 			dsm_debug("");
 			/* Wait for response */
-			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 			dsm_drop_request(response);
 			
 			//unsetting the bit in the page
@@ -231,7 +231,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	dsm_debug("");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 	dsm_debug("");
 
 	BUG_ON(response->length!=PAGE_SIZE);
@@ -352,7 +352,8 @@ struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int lo
 
 	index = request->pg_id;
 	inode = iget_locked(channel->sb, request->ino);
-	dsm_debug("sb %p inode %p num %ld, pg_idx %d size %lld, state %ld, locked %d\n", inode->i_sb, inode, inode->i_ino, index, inode->i_size, inode->i_state, locked);
+	dsm_debug("sb %p inode %p num %ld, pg_idx %d size %lld, state %ld, locked %d\n", 
+			inode->i_sb, inode, inode->i_ino, index, inode->i_size, inode->i_state, locked);
 	BUG_ON(inode->i_state & I_NEW);
 	mapping = inode->i_mapping;
 	//struct page * page = find_get_page(mapping, index);
@@ -373,7 +374,7 @@ struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int lo
 	}
 	if(locked)
 		dsm_debug("locked page index %d owner %d\n", index, page->dsm_prob_owner);
-	BUG_ON(!page);
+	//BUG_ON(!page);
 	return page;
 }
 
@@ -389,11 +390,13 @@ void dsm_release_page(struct page *page, int locked)
 int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 {
 	int ret = 0;
-	int locked = !(request->req_type == DSM_REQ_INVALIDATE);//inval does not lock page
-	struct page *page = dsm_get_page(request, channel, locked);
+	int locked;
+	struct page *page;
 
 	print_request(request);
 	
+	locked = !(request->req_type == DSM_REQ_INVALIDATE);//inval does not lock page
+	page = dsm_get_page(request, channel, locked);
 
 	if(!page)
 	{
@@ -448,14 +451,52 @@ out:
 }
 
 
-int dsm_server_threadfn(void *data)
+int dsm_read_server(void *data)
 {
 	dsm_request_t *request;
 	dsm_channel_t *server_channel=(dsm_channel_t*)data;
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1);
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_READ);
+		if(!kthread_should_stop() && request)
+			handle_request(request, server_channel);
+		if(!request){
+			dsm_debug("");
+		}
+		dsm_drop_request(request);
+	}
+	
+	return 0;
+}
+
+int dsm_write_server(void *data)
+{
+	dsm_request_t *request;
+	dsm_channel_t *server_channel=(dsm_channel_t*)data;
+
+	while(!kthread_should_stop()) 
+	{
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_WRITE);
+		if(!kthread_should_stop() && request)
+			handle_request(request, server_channel);
+		if(!request){
+			dsm_debug("");
+		}
+		dsm_drop_request(request);
+	}
+	
+	return 0;
+}
+
+int dsm_inval_server(void *data)
+{
+	dsm_request_t *request;
+	dsm_channel_t *server_channel=(dsm_channel_t*)data;
+
+	while(!kthread_should_stop()) 
+	{
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_INVALIDATE);
 		if(!kthread_should_stop() && request)
 			handle_request(request, server_channel);
 		if(!request){
@@ -487,24 +528,41 @@ int dsmfs_server_init(struct super_block *sb)
 	dsm_debug("%s: server_id %d\n", __func__, server_channel->id);
 
 	/* TODO: use a thread pool */
-	fsi->thread = kthread_run(dsm_server_threadfn, (void*)server_channel, "dsm-server:%d", server_id);
-	if (IS_ERR(fsi->thread)) {
+	fsi->read_server = kthread_run(dsm_read_server, (void*)server_channel, "dsm-server:%d", server_id);
+	if (IS_ERR(fsi->read_server)) {
 		dsm_print("server creation failed\n");
-		return PTR_ERR(fsi->thread);
+		return PTR_ERR(fsi->read_server);
+	}
+	fsi->write_server = kthread_run(dsm_write_server, (void*)server_channel, "dsm-server:%d", server_id);
+	if (IS_ERR(fsi->write_server)) {
+		dsm_print("server creation failed\n");
+		return PTR_ERR(fsi->write_server);
+	}
+	fsi->inval_server = kthread_run(dsm_inval_server, (void*)server_channel, "dsm-server:%d", server_id);
+	if (IS_ERR(fsi->inval_server)) {
+		dsm_print("server creation failed\n");
+		return PTR_ERR(fsi->inval_server);
 	}
 
 	return 0;
+}
+
+void __dsmfs_server_destroy(struct task_struct* thread)
+{
+	if (thread)
+	{
+		//TODO: send signal? More thinking on the stopping phase
+       		kthread_stop(thread);
+		dsm_print("DSMFS: THREAD Stopped\n");
+
+	}
 }
 
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 {
 
 	dsm_print("DSMFS: killing server\n");
-	if (fsi->thread)
-	{
-		//TODO: send signal? More thinking on the stopping phase
-       		kthread_stop(fsi->thread);
-		dsm_print("DSMFS: THREAD Stopped\n");
-
-	}
+	__dsmfs_server_destroy(fsi->read_server);
+	__dsmfs_server_destroy(fsi->write_server);
+	__dsmfs_server_destroy(fsi->inval_server);
 }
