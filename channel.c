@@ -22,28 +22,28 @@ struct dsm_comm_hentry
 
 void print_request(dsm_request_t *request);
 
-#define MAX_SEMA 64+1
-struct semaphore dsm_request_semaphores[MAX_SEMA];
+#define MAX_SEMA 12+1
+struct semaphore dsm_request_semaphores[MAX_SEMA][DSM_REQ_NUM];
 struct semaphore dsm_response_semaphores[MAX_SEMA];
 		
-static void sema_up(int sema_id, int response)
+static void sema_up(int sema_id, int response, int req_type)
 {
-	dsm_debug("sema %d is it a response? %d\n", sema_id, response);
+	dsm_debug("sema %d is it a response? %d, req_type %d\n", sema_id, response, req_type);
 
 	if(response)
 		up(&dsm_response_semaphores[sema_id]);
 	else
-		up(&dsm_request_semaphores[sema_id]);
+		up(&dsm_request_semaphores[sema_id][req_type-1]);
 }
 
-static int sema_down(int sema_id, int response)
+static int sema_down(int sema_id, int response, int req_type)
 {
-	dsm_debug("sema %d is it a response? %d\n", sema_id, response);
+	dsm_debug("sema %d is it a response? %d, req_type %d\n", sema_id, response, req_type);
 
 	if(response)
 		return down_killable(&dsm_response_semaphores[sema_id]);
 	else
-		return down_killable(&dsm_request_semaphores[sema_id]);
+		return down_killable(&dsm_request_semaphores[sema_id][req_type-1]);
 }
 
 static int channel_put_request(int target_id, int local_id, dsm_request_t *request)
@@ -78,16 +78,16 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t *reque
 	dsm_debug("");
 
 	if(local_id == src_id)	//this is a request
-		sema_up(target_id, 0);
+		sema_up(target_id, 0, request->req_type);
 	else if (target_id != src_id)	//this is a request (forwarded)
-		sema_up(target_id, 0);
+		sema_up(target_id, 0, request->req_type);
 	else			//this is a response
-		sema_up(target_id, 1);
+		sema_up(target_id, 1, request->req_type);
 
 	return 0;
 }
 
-static struct dsm_request_s* channel_get_request(int local_id)
+static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_type req_type)
 {
 	int ret;
 	int bkt;
@@ -101,7 +101,7 @@ static struct dsm_request_s* channel_get_request(int local_id)
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, -1);
-	ret=sema_down(local_id, 0);
+	ret=sema_down(local_id, 0, req_type);
 	if(ret<0)
 		goto out_err;
 
@@ -112,7 +112,7 @@ static struct dsm_request_s* channel_get_request(int local_id)
 		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
-		if(entry->tgt_id==local_id && request->src_id != local_id)
+		if(entry->tgt_id==local_id && request->src_id != local_id && (req_type == request->req_type))
 		{
 			found=1;
 			break;
@@ -129,7 +129,10 @@ static struct dsm_request_s* channel_get_request(int local_id)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
 
 	if(!found)
-		dsm_print("This should not happens!!!!!!!!!!!!!!!!!!!");
+	{
+		sema_up(local_id, 0, req_type);//the request maybe for another thread
+		msleep(1);//TODO: remove me?
+	}
 
 out_err:
 	return request;
@@ -148,7 +151,7 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, 0);
-	ret=sema_down(local_id, 1);
+	ret=sema_down(local_id, 1, -1);
 	if(ret<0)
 		goto out_err;
 
@@ -180,8 +183,8 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 
 	if(!found)
 	{
-		sema_up(local_id, 1);//the request maybe for another thread
-		msleep(500);//TODO: remove me?
+		sema_up(local_id, 1, -1);//the request maybe for another thread
+		msleep(1);//TODO: remove me?
 	}
 
 out_err:
@@ -191,14 +194,15 @@ out_err:
 
 static void dsm_channel_init(int local_id)
 {
-	int i;
+	int i,j;
 
 	if(local_id != 0)/* only 0 initialize the channels */
 		return;
 		
 	for (i=0; i< MAX_SEMA; i++)
 	{
-		sema_init(&dsm_request_semaphores[i], 0);
+		for (j=0; j< DSM_REQ_NUM; j++)
+			sema_init(&dsm_request_semaphores[i][j], 0);
 		sema_init(&dsm_response_semaphores[i], 0);
 	}
 }
@@ -231,7 +235,7 @@ void dsm_drop_request(dsm_request_t* request)
 	kfree(entry);
 }
 
-int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id)
+int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type)
 {
 	dsm_request_t * ret=NULL;
 	do{
@@ -249,7 +253,7 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 				__func__, server_channel->id, tx_id);
 
 		if(tx_id==-1)
-			ret=channel_get_request(server_channel->id);
+			ret=channel_get_request(server_channel->id, req_type);
 		else
 			ret=channel_get_response(server_channel->id, tx_id);
 	}while(ret==NULL); 

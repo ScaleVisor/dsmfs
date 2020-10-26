@@ -114,7 +114,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	dsm_debug("\n");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 	print_request(response);
 	dsm_debug("\n");
 
@@ -188,7 +188,7 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 
 			dsm_debug("");
 			/* Wait for response */
-			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 			dsm_drop_request(response);
 			
 			//unsetting the bit in the page
@@ -231,7 +231,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	dsm_debug("");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id);
+	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
 	dsm_debug("");
 
 	BUG_ON(response->length!=PAGE_SIZE);
@@ -458,7 +458,7 @@ int dsm_read_server(void *data)
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1);
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_READ);
 		if(!kthread_should_stop() && request)
 			handle_request(request, server_channel);
 		if(!request){
@@ -477,7 +477,7 @@ int dsm_write_server(void *data)
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1);
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_WRITE);
 		if(!kthread_should_stop() && request)
 			handle_request(request, server_channel);
 		if(!request){
@@ -496,7 +496,7 @@ int dsm_inval_server(void *data)
 
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1);
+		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_INVALIDATE);
 		if(!kthread_should_stop() && request)
 			handle_request(request, server_channel);
 		if(!request){
