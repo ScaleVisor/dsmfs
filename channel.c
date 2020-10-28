@@ -41,9 +41,9 @@ static int sema_down(int sema_id, int response, int req_type)
 	dsm_debug("sema %d is it a response? %d, req_type %d\n", sema_id, response, req_type);
 
 	if(response)
-		return down_killable(&dsm_response_semaphores[sema_id]);
+		return down_interruptible(&dsm_response_semaphores[sema_id]);
 	else
-		return down_killable(&dsm_request_semaphores[sema_id][req_type-1]);
+		return down_interruptible(&dsm_request_semaphores[sema_id][req_type-1]);
 }
 
 static int channel_put_request(int target_id, int local_id, dsm_request_t *request)
@@ -130,7 +130,7 @@ static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_
 
 	if(!found)
 	{
-		sema_up(local_id, 0, req_type);//the request maybe for another thread
+		sema_up(local_id, 0, req_type);//the request is for another thread
 		msleep(1);//TODO: remove me?
 	}
 
@@ -229,6 +229,8 @@ void dsm_drop_request(dsm_request_t* request)
 {
 	struct dsm_comm_hentry *entry=NULL;
 
+	BUG_ON(!request);
+
 	if(request->length)
 		kfree(request->payload);
 	entry = container_of(request, struct dsm_comm_hentry, request);
@@ -239,24 +241,13 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 {
 	dsm_request_t * ret=NULL;
 	do{
-#if 0
-		if(kthread_should_stop());
-		{
-			dsm_debug("DSMFS: %s: kthread_stop server_id %d tx_id %d\n", 
-				__func__, server_channel->id, tx_id);
-			
-			break;
-		}
-
-#endif
-		dsm_debug("DSMFS: %s: server_id %d tx_id %d\n", 
-				__func__, server_channel->id, tx_id);
+		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
 
 		if(tx_id==-1)
 			ret=channel_get_request(server_channel->id, req_type);
 		else
 			ret=channel_get_response(server_channel->id, tx_id);
-	}while(ret==NULL); 
+	}while(ret==NULL && !kthread_should_stop()); 
 
 	*request=ret;
 

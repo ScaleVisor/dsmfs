@@ -375,11 +375,14 @@ struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int lo
 	if(locked)
 		dsm_debug("locked page index %d owner %d\n", index, page->dsm_prob_owner);
 	//BUG_ON(!page);
+	//FIXME: here? yes, we have a refcount on the page it is enough?!
+	//iput(inode);
 	return page;
 }
 
 void dsm_release_page(struct page *page, int locked)
 {
+	//put_page(page);//FIXME: should we not lock the page
 	if(locked)
 	{
 		dsm_debug("unlocked page index %ld owner %d\n", page->index, page->dsm_prob_owner);
@@ -450,62 +453,40 @@ out:
 	return ret;
 }
 
-
-int dsm_read_server(void *data)
+int dsm_core_server(void *data, enum dsm_request_type req_type)
 {
 	dsm_request_t *request;
 	dsm_channel_t *server_channel=(dsm_channel_t*)data;
 
+	/* set signal mask to what we want to respond */
+	allow_signal(SIGKILL);
+
 	while(!kthread_should_stop()) 
 	{
-		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_READ);
-		if(!kthread_should_stop() && request)
-			handle_request(request, server_channel);
-		if(!request){
-			dsm_debug("");
-		}
+		dsm_channel_get_request(server_channel, &request, -1, req_type);
+		if(!request)
+			continue;
+		handle_request(request, server_channel);
 		dsm_drop_request(request);
 	}
 	
 	return 0;
+}
+
+
+int dsm_read_server(void *data)
+{
+	return dsm_core_server(data, DSM_REQ_READ);
 }
 
 int dsm_write_server(void *data)
 {
-	dsm_request_t *request;
-	dsm_channel_t *server_channel=(dsm_channel_t*)data;
-
-	while(!kthread_should_stop()) 
-	{
-		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_WRITE);
-		if(!kthread_should_stop() && request)
-			handle_request(request, server_channel);
-		if(!request){
-			dsm_debug("");
-		}
-		dsm_drop_request(request);
-	}
-	
-	return 0;
+	return dsm_core_server(data, DSM_REQ_WRITE);
 }
 
 int dsm_inval_server(void *data)
 {
-	dsm_request_t *request;
-	dsm_channel_t *server_channel=(dsm_channel_t*)data;
-
-	while(!kthread_should_stop()) 
-	{
-		dsm_channel_get_request(server_channel, &request, -1, DSM_REQ_INVALIDATE);
-		if(!kthread_should_stop() && request)
-			handle_request(request, server_channel);
-		if(!request){
-			dsm_debug("");
-		}
-		dsm_drop_request(request);
-	}
-	
-	return 0;
+	return dsm_core_server(data, DSM_REQ_INVALIDATE);
 }
 
 //TODO: the argument should be fsi ? or another specific struct
@@ -528,17 +509,17 @@ int dsmfs_server_init(struct super_block *sb)
 	dsm_debug("%s: server_id %d\n", __func__, server_channel->id);
 
 	/* TODO: use a thread pool */
-	fsi->read_server = kthread_run(dsm_read_server, (void*)server_channel, "dsm-server:%d", server_id);
+	fsi->read_server = kthread_run(dsm_read_server, (void*)server_channel, "dsm-read-server:%d", server_id);
 	if (IS_ERR(fsi->read_server)) {
 		dsm_print("server creation failed\n");
 		return PTR_ERR(fsi->read_server);
 	}
-	fsi->write_server = kthread_run(dsm_write_server, (void*)server_channel, "dsm-server:%d", server_id);
+	fsi->write_server = kthread_run(dsm_write_server, (void*)server_channel, "dsm-write-server:%d", server_id);
 	if (IS_ERR(fsi->write_server)) {
 		dsm_print("server creation failed\n");
 		return PTR_ERR(fsi->write_server);
 	}
-	fsi->inval_server = kthread_run(dsm_inval_server, (void*)server_channel, "dsm-server:%d", server_id);
+	fsi->inval_server = kthread_run(dsm_inval_server, (void*)server_channel, "dsm-inval-server:%d", server_id);
 	if (IS_ERR(fsi->inval_server)) {
 		dsm_print("server creation failed\n");
 		return PTR_ERR(fsi->inval_server);
@@ -551,17 +532,16 @@ void __dsmfs_server_destroy(struct task_struct* thread)
 {
 	if (thread)
 	{
-		//TODO: send signal? More thinking on the stopping phase
+		send_sig(SIGKILL, thread, 1);
        		kthread_stop(thread);
-		dsm_print("DSMFS: THREAD Stopped\n");
-
+		dsm_print("THREAD Stopped\n");
 	}
 }
 
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 {
 
-	dsm_print("DSMFS: killing server\n");
+	dsm_print("killing server\n");
 	__dsmfs_server_destroy(fsi->read_server);
 	__dsmfs_server_destroy(fsi->write_server);
 	__dsmfs_server_destroy(fsi->inval_server);

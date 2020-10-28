@@ -73,6 +73,8 @@ static int simple_readpage_wrapper(struct file *file, struct page *page)
 }
 
 static const struct address_space_operations dsmfs_aops = {
+	/* To explore for freeing some pages ........... *
+	 * .writepage, writepages, releasepage, freepage */
 	.readpage	= simple_readpage_wrapper,
 	.write_begin	= simple_write_begin,
 	.write_end	= simple_write_end,
