@@ -247,6 +247,7 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 			ret=channel_get_request(server_channel->id, req_type);
 		else
 			ret=channel_get_response(server_channel->id, tx_id);
+	//}while(ret==NULL && !kthread_should_stop()); 
 	}while(ret==NULL && !kthread_should_stop()); 
 
 	*request=ret;
