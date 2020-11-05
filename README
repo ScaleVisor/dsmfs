@@ -1,0 +1,5 @@
+Mounting example:
+
+sudo mount -t dsmfs -osize=6G,mode=1777,id=$ID  tmpfs /dev/shm
+
+where $ID is the id of the node.
