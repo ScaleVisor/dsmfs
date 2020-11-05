@@ -3,10 +3,9 @@
 #
 
 
-obj-m += dsmfs.o 
-dsmfs-objs += init.o file-mmu.o inode.o channel.o dsm.o unmap.o
+KDIR ?= /lib/modules/`uname -r`/build
 
-all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+default:
+	$(MAKE) -C $(KDIR) M=$$PWD
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$$PWD clean
