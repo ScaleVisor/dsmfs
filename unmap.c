@@ -1,3 +1,8 @@
+/* Copyright (C) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Mohamed Lamine Karaoui <moharaka@gmail.com>, November 2020
+ */
 
 #include "internal.h"
 //arch/x86/include/asm/pgtable.h

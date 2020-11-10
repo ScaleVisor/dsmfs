@@ -1,3 +1,11 @@
+/* Copyright (C) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Mohamed Lamine Karaoui <moharaka@gmail.com>, November 2020
+ */
+
+
+//FIXME: rewrite copied parts
 /*
  * Resizable simple ram filesystem for Linux.
  *

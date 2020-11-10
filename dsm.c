@@ -1,16 +1,7 @@
-/*
- * Support KVM software distributed memory
- *
- * This feature allows us to run multiple KVM instances on different machines
- * sharing the same address space.
- *
- * Authors:
- *   Chen Yubin <i@binss.me>
- *   Ding Zhuocheng <tcbbdddd@gmail.com>
- *   Zhang Jin <437629012@qq.com>
- *
- * This work is licensed under the terms of the GNU GPL, version 2.  See
- * the COPYING file in the top-level directory.
+/* Copyright (C) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Mohamed Lamine Karaoui <moharaka@gmail.com>, November 2020
  */
 
 /*

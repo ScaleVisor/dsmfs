@@ -1,3 +1,9 @@
+/* Copyright (C) - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Mohamed Lamine Karaoui <moharaka@gmail.com>, November 2020
+ */
+
 #include "channel.h"
 #include "internal.h"
 #include <linux/delay.h>
