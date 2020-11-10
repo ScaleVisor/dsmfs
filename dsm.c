@@ -495,6 +495,7 @@ int dsmfs_server_init(struct super_block *sb)
 	dsm_channel_t * server_channel;
 	struct dsmfs_fs_info *fsi;
 	int server_id;
+	int i;
 	
 	fsi = (struct dsmfs_fs_info*) sb->s_fs_info;
 	server_id = fsi->server_id;
@@ -509,20 +510,23 @@ int dsmfs_server_init(struct super_block *sb)
 	dsm_debug("%s: server_id %d\n", __func__, server_channel->id);
 
 	/* TODO: use a thread pool */
-	fsi->read_server = kthread_run(dsm_read_server, (void*)server_channel, "dsm-read-server:%d", server_id);
-	if (IS_ERR(fsi->read_server)) {
-		dsm_print("server creation failed\n");
-		return PTR_ERR(fsi->read_server);
-	}
-	fsi->write_server = kthread_run(dsm_write_server, (void*)server_channel, "dsm-write-server:%d", server_id);
-	if (IS_ERR(fsi->write_server)) {
-		dsm_print("server creation failed\n");
-		return PTR_ERR(fsi->write_server);
-	}
-	fsi->inval_server = kthread_run(dsm_inval_server, (void*)server_channel, "dsm-inval-server:%d", server_id);
-	if (IS_ERR(fsi->inval_server)) {
-		dsm_print("server creation failed\n");
-		return PTR_ERR(fsi->inval_server);
+	for(i=0; i<NUM_SERVER; i++)
+	{
+		fsi->read_server[i] = kthread_run(dsm_read_server, (void*)server_channel, "dsm-read-server:%d:%d", server_id, i);
+		if (IS_ERR(fsi->read_server[i])) {
+			dsm_print("server creation failed\n");
+			return PTR_ERR(fsi->read_server[i]);
+		}
+		fsi->write_server[i] = kthread_run(dsm_write_server, (void*)server_channel, "dsm-write-server:%d:%d", server_id, i);
+		if (IS_ERR(fsi->write_server[i])) {
+			dsm_print("server creation failed\n");
+			return PTR_ERR(fsi->write_server[i]);
+		}
+		fsi->inval_server[i] = kthread_run(dsm_inval_server, (void*)server_channel, "dsm-inval-server:%d:%d", server_id, i);
+		if (IS_ERR(fsi->inval_server[i])) {
+			dsm_print("server creation failed\n");
+			return PTR_ERR(fsi->inval_server[i]);
+		}
 	}
 
 	return 0;
@@ -540,9 +544,12 @@ void __dsmfs_server_destroy(struct task_struct* thread)
 
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 {
-
+	int i;
 	dsm_print("killing server\n");
-	__dsmfs_server_destroy(fsi->read_server);
-	__dsmfs_server_destroy(fsi->write_server);
-	__dsmfs_server_destroy(fsi->inval_server);
+	for(i=0; i<NUM_SERVER; i++)
+	{
+		__dsmfs_server_destroy(fsi->read_server[i]);
+		__dsmfs_server_destroy(fsi->write_server[i]);
+		__dsmfs_server_destroy(fsi->inval_server[i]);
+	}
 }

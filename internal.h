@@ -34,9 +34,10 @@ struct dsmfs_fs_info {
 	char rip[IP_MAX_SIZE];// remote ip (we need a list)
 	short rport;// remote port (we need a list)
 	dsm_channel_t * server_channel;
-	struct task_struct *read_server;//server thread
-	struct task_struct *write_server;//server thread
-	struct task_struct *inval_server;//server thread
+	#define NUM_SERVER 3
+	struct task_struct *read_server[NUM_SERVER];//server thread
+	struct task_struct *write_server[NUM_SERVER];//server thread
+	struct task_struct *inval_server[NUM_SERVER];//server thread
 	struct dsmfs_mount_opts mount_opts;
 };
 
