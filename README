@@ -1,4 +1,9 @@
-## Mounting example:
+# Compilation
+
+To be compiled with a specific version of Linux found at: https://github.com/moharaka/linux-stable-dsm (branch dsmfs)
+
+
+# Mounting example:
 
 sudo mount -t dsmfs -osize=6G,mode=1777,id=$ID  tmpfs /dev/shm
 
