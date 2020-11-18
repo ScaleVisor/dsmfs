@@ -80,6 +80,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 {
 	dsm_request_t request;
 	dsm_request_t *response;
+	dsm_time("Entered");
 
 	BUG_ON(!page);
 	BUG_ON(!PageLocked(page));
@@ -138,6 +139,7 @@ out:
 
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
 
+	dsm_time("Exited");
 	return 0;
 }
 
@@ -195,6 +197,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	dsm_request_t request;
 	dsm_request_t *response;
 	response=NULL;
+	dsm_time("Entered");
 
 	/* page already locked */
 	dsm_debug("\n");
@@ -249,6 +252,7 @@ inval:
 	if(response)
 		dsm_drop_request(response);
 
+	dsm_time("Exited");
 	return 0;
 }
 
@@ -386,6 +390,12 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	int ret = 0;
 	int locked;
 	struct page *page;
+	if(request->req_type == DSM_REQ_READ)
+		dsm_time("Entered READ");
+	else if(request->req_type == DSM_REQ_WRITE)
+		dsm_time("Entered WRITE");
+	else
+		dsm_time("Entered INVAL");
 
 	print_request(request);
 	
@@ -441,6 +451,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	}
 	dsm_release_page(page, locked);
 out:
+	dsm_time("Exited");
 	return ret;
 }
 

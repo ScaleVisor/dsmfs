@@ -31,8 +31,8 @@ by K. Li and P. Hudak  [https://dl.acm.org/doi/pdf/10.1145/75104.75105] (page 16
 
 Algorithm 2 DynamicDistributedManager 
 Read fault handler: 
- Lock{ PTable[p].lock );
- ask PTableE p l.probOwner for read access to p;
+ Lock( PTable[p].lock );
+ ask PTable[p].probOwner for read access to p;
  PTable[ p ].probOwner := self;
  PTable[ p ].access := read;
  Unlock( PTable[ p ] .lock );
