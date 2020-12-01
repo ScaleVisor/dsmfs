@@ -60,4 +60,6 @@ int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm
 
 int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type);
 
+int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type);
+
 void dsm_drop_request(dsm_request_t* request);

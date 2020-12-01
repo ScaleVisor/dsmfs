@@ -93,7 +93,8 @@ static int channel_put_request(int target_id, int local_id, dsm_request_t *reque
 	return 0;
 }
 
-static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_type req_type)
+static int channel_get_request(int local_id, 
+		enum dsm_request_type req_type, dsm_request_t** ret_request)
 {
 	int ret;
 	int bkt;
@@ -101,6 +102,7 @@ static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_
 	dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
+	ret = 0;
 	found = 0;
 	entry = NULL;
 	request = NULL;
@@ -118,7 +120,8 @@ static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_
 		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
-		if(entry->tgt_id==local_id && request->src_id != local_id && (req_type == request->req_type))
+		if(entry->tgt_id==local_id && 
+			request->src_id != local_id && (req_type == request->req_type))
 		{
 			found=1;
 			break;
@@ -137,20 +140,22 @@ static struct dsm_request_s* channel_get_request(int local_id, enum dsm_request_
 	if(!found)
 	{
 		sema_up(local_id, 0, req_type);//the request is for another thread
-		msleep(1);//TODO: remove me?
+		//msleep(1);//TODO: remove me?
 	}
 
 out_err:
-	return request;
+	*ret_request = request;
+	return ret;
 }
 
-static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
+static int channel_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
 {
 	int ret;
 	int found;
 	dsm_request_t* request;
  	struct dsm_comm_hentry *entry;
 
+	ret = 0;
 	found = 0;
 	entry = NULL;
 	request = NULL;
@@ -190,11 +195,12 @@ static struct dsm_request_s* channel_get_response(int local_id, int tx_id)
 	if(!found)
 	{
 		sema_up(local_id, 1, -1);//the request maybe for another thread
-		msleep(1);//TODO: remove me?
+		//msleep(1);//TODO: remove me?
 	}
 
 out_err:
-	return request;
+	*ret_request = request;
+	return ret;
 }
 
 
@@ -245,20 +251,33 @@ void dsm_drop_request(dsm_request_t* request)
 
 int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type)
 {
-	dsm_request_t * ret=NULL;
+	/* should be called by dsm servers only */
+	int ret = 0;
+	dsm_request_t * req=NULL;
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
+		BUG_ON(tx_id!=-1);
+		ret=channel_get_request(server_channel->id, req_type, &req);
+	}while(!ret && req==NULL); 
 
-		if(tx_id==-1)
-			ret=channel_get_request(server_channel->id, req_type);
-		else
-			ret=channel_get_response(server_channel->id, tx_id);
-	//}while(ret==NULL && !kthread_should_stop()); 
-	}while(ret==NULL); 
+	*request=req;
+	return ret;
+}
 
-	*request=ret;
+int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type)
+{
+	/* req_type ignored for now */
+	int ret = 0;
+	dsm_request_t * req=NULL;
+	do{
+		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
+		BUG_ON(tx_id==-1);
+		ret = channel_get_response(server_channel->id, tx_id, &req);
+	}while(req==NULL); /* main difference with get_request : merge ? */
 
-	return 0;
+	*request=req;
+
+	return ret;
 }
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request)

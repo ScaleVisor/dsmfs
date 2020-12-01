@@ -106,7 +106,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	dsm_debug("\n");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
+	dsm_channel_get_response(i_get_server_channel(inode), &response, request.tx_id, 0);
 	print_request(response);
 	dsm_debug("\n");
 
@@ -181,7 +181,7 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 
 			dsm_debug("");
 			/* Wait for response */
-			dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
+			dsm_channel_get_response(i_get_server_channel(inode), &response, request.tx_id, 0);
 			dsm_drop_request(response);
 			
 			//unsetting the bit in the page
@@ -225,7 +225,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	dsm_debug("");
 	/* Wait for response */
-	dsm_channel_get_request(i_get_server_channel(inode), &response, request.tx_id, 0);
+	dsm_channel_get_response(i_get_server_channel(inode), &response, request.tx_id, 0);
 	dsm_debug("");
 
 	BUG_ON(response->length!=PAGE_SIZE);

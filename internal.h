@@ -23,9 +23,13 @@
 #define dsm_print(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
 		current->pid, __func__, __LINE__, ##__VA_ARGS__)
 
+#ifdef DSM_TRACE
 #define dsm_time(stepname) printk(KERN_INFO "%d:%s:%d:DSMTRACE %s\n",		\
 		current->pid, __func__, __LINE__, stepname)
 //#define dsm_time(stepname) printk(KERN_INFO "%d:%s:%d:DSMTIME %s", current->pid, __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define dsm_time(stepname) /**/
+#endif
 
 struct dsmfs_mount_opts {
 	umode_t mode;
