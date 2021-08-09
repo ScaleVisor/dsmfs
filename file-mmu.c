@@ -66,9 +66,15 @@ static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vm
 	dsm_time("Entered");
 	//dump_stack();
 	ret=filemap_fault(vma, vmf);
-	dsm_debug("ret %d page %p!\n", ret, vmf->page);  
-	if(vmf->page)  
-		dsmfs_fill_page(inode, vmf->page);
+	if(vmf->page){
+		if(vmf->flags & FAULT_FLAG_WRITE)  {
+			dsmfs_upgrade_page(inode, vmf->page);	
+		}else{
+			dsmfs_fill_page(inode, vmf->page);
+		}	
+		goto out;
+	}	
+out:
 	dsm_time("Exited");
 	return ret;
 }
@@ -95,11 +101,13 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 
 
 	ret=filemap_page_mkwrite(vma, vmf);
-	if(ret==VM_FAULT_LOCKED)
-		dsmfs_upgrade_page(inode, page);
-
-	//printk("%s:%d %d Exited\n", __func__, __LINE__, current->pid);
-	dsm_time("Exited");
+	if(ret==VM_FAULT_LOCKED){
+		if(vmf->flags & FAULT_FLAG_WRITE) {
+			dsmfs_upgrade_page(inode, page);	
+		}
+		goto out;	
+	}
+out:
 	return ret;
 
 }

@@ -84,7 +84,9 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	BUG_ON(!page);
 	BUG_ON(!PageLocked(page));
-
+	if(PageDsmValid(page)){
+		goto out;
+	}
 	/* page already locked */
 	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, page->dsm_copyset);
 
@@ -203,7 +205,10 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	dsm_debug("\n");
 
 	BUG_ON(!PageLocked(page));
-
+	//Check if the page has write bit set 
+	if(PageDsmValid(page) && PageDsmWrite(page)){
+		goto out;
+	}
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
 	/* if we are already owner */
 	if(is_owner(i_get_server_channel(inode), page))
@@ -235,7 +240,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	/* Copy payload */
 	memcpy(page_to_virt(page), response->payload, PAGE_SIZE);
-
+	dsm_drop_request(response);
 inval:
 	dsm_debug("calling inval");
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
@@ -249,9 +254,9 @@ inval:
 	BUG_ON(!PageLocked(page));
 	page->dsm_prob_owner = i_get_server_id(inode);
 
-	if(response)
-		dsm_drop_request(response);
-
+	/*if(response)
+		dsm_drop_request(response);*/
+out:
 	dsm_time("Exited");
 	return 0;
 }
@@ -417,6 +422,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 		drop_all_permission(page);
 		dsmfs_page_iv(page);
 		dsm_channel_send_request(channel, request->src_id, request);
+		page->dsm_prob_owner = request->src_id;
 	}else
 	{ 	
 		BUG_ON(!PageLocked(page));
