@@ -8,6 +8,7 @@
 //arch/x86/include/asm/pgtable.h
 #include <linux/rmap.h>
 #include <linux/mmu_notifier.h>
+#include <asm-generic/cacheflush.h>
 
 static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 			    unsigned long address, void *arg)

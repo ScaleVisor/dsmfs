@@ -5,7 +5,10 @@
 
 typedef struct dsm_channel_s{
 	int id;
+	//int central_port;
+       	//char* central_ip;
 	struct super_block *sb;
+        struct task_struct *server_thread;
 }dsm_channel_t;
 
 //TODO: synchronize with page->dsm_copyset
@@ -63,3 +66,11 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** request, int tx_id, enum dsm_request_type req_type);
 
 void dsm_drop_request(dsm_request_t* request);
+
+
+/* htable function: free to use by any channel type */
+int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request_t** ret_request);
+int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request);
+int htable_put_request(int target_id, int local_id, dsm_request_t *request);
+void htable_drop_request(dsm_request_t* request);
+void htable_init(int local_id);
