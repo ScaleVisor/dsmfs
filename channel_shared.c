@@ -8,10 +8,31 @@
 #include <linux/jhash.h>
 
 
+void print_request(dsm_request_t *request);
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request)
 {
-	htable_put_request(target_node, server_channel->id, request);
+	/* Really necessary to copy the payload ?*/
+	dsm_request_t __request;
+	__request = *request;
+
+	if(request->length)//length means a response?
+	{
+		__request.payload = kmalloc(request->length, GFP_KERNEL); /* freed in dsm_drop_request */
+		memcpy(__request.payload, request->payload, request->length);
+	}
+
+	print_request(request);
+	print_request(&__request);
+	
+	if(request->length)
+	{
+		dsm_debug("hash %d %d\n", jhash(__request.payload,__request.length,0), jhash(__request.payload,__request.length,0));
+		dsm_debug("content int0 %d\n", *((int*)(__request.payload)));
+		dsm_debug("content int0 %d\n", *((int*)(request->payload)));
+	}
+
+	htable_put_request(target_node, server_channel->id, &__request);
 	return 0;
 }
 
@@ -20,11 +41,11 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 	/* should be called by dsm servers only */
 	int ret = 0;
 	dsm_request_t * req=NULL;
+	BUG_ON(tx_id!=-1);//-1: any tx
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
-		BUG_ON(tx_id!=-1);
 		ret=htable_get_request(server_channel->id, req_type, &req);
-	}while(!ret && req==NULL); 
+	}while(!ret && req==NULL);
 
 	*request=req;
 	return ret;
@@ -35,9 +56,9 @@ int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** requ
 	/* req_type ignored for now */
 	int ret = 0;
 	dsm_request_t * req=NULL;
+	BUG_ON(tx_id==-1);//specific transaction
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
-		BUG_ON(tx_id==-1);
 		ret = htable_get_response(server_channel->id, tx_id, &req);
 	}while(req==NULL); /* main difference with get_request : merge ? */
 
@@ -48,6 +69,9 @@ int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** requ
 
 void dsm_drop_request(dsm_request_t* request)
 {
+	BUG_ON(!request);
+	if(request->length)
+		kfree(request->payload);
 	htable_drop_request(request);
 }
 

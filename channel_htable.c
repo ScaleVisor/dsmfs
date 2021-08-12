@@ -14,8 +14,8 @@
 #include <linux/jhash.h>
 
 #define __BLOCKED_HASH_BITS	7
-static DEFINE_HASHTABLE(dsm_comm_htable, __BLOCKED_HASH_BITS);
-static DEFINE_SPINLOCK(dsm_comm_hlock);
+static DEFINE_HASHTABLE(main_htable, __BLOCKED_HASH_BITS);
+static DEFINE_SPINLOCK(htable_lock);
 
 struct dsm_comm_hentry
 {
@@ -58,28 +58,14 @@ int htable_put_request(int target_id, int local_id, dsm_request_t *request)
 
 	src_id = request->src_id;
 
-	entry = kmalloc(sizeof(struct dsm_comm_hentry), GFP_KERNEL);
+	entry = kmalloc(sizeof(struct dsm_comm_hentry), GFP_KERNEL);/* free in htable_drop_request */
 	entry->tgt_id = target_id;
 	entry->request = *request;
-	if(request->length)
-	{
-		entry->request.payload = kmalloc(request->length, GFP_KERNEL);
-		memcpy(entry->request.payload, request->payload, request->length);
-	}
 
-	print_request(request);
-	print_request(&entry->request);
-	
-	if(request->length)
-	{
-		dsm_debug("hash %d %d\n", jhash(entry->request.payload,entry->request.length,0), jhash(entry->request.payload,entry->request.length,0));
-		dsm_debug("content int0 %d\n", *((int*)(entry->request.payload)));
-		dsm_debug("content int0 %d\n", *((int*)(request->payload)));
-	}
 	//dsm_debug("content int0 %d\n", *((int*)(request->payload)));
-	spin_lock(&dsm_comm_hlock);
-	hash_add(dsm_comm_htable, &entry->hlink, request->tx_id);
-	spin_unlock(&dsm_comm_hlock);
+	spin_lock(&htable_lock);
+	hash_add(main_htable, &entry->hlink, request->tx_id);
+	spin_unlock(&htable_lock);
 	dsm_debug("");
 
 	if(local_id == src_id)	//this is a request
@@ -112,9 +98,9 @@ int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request
 		goto out_err;
 
 
-	spin_lock(&dsm_comm_hlock);
-	//hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) sock) {
-	hash_for_each(dsm_comm_htable, bkt, entry, hlink) {
+	spin_lock(&htable_lock);
+	//hash_for_each_possible(main_htable, entry, hlink, (long) sock) {
+	hash_for_each(main_htable, bkt, entry, hlink) {
 		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
@@ -130,7 +116,7 @@ int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request
 		hash_del(&entry->hlink);
 	else
 		request=NULL;
-	spin_unlock(&dsm_comm_hlock);
+	spin_unlock(&htable_lock);
 
 	if(found && request->length)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
@@ -164,10 +150,10 @@ int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
 	if(ret<0)
 		goto out_err;
 
-	spin_lock(&dsm_comm_hlock);
+	spin_lock(&htable_lock);
 	dsm_debug("DSMFS: %s:%d\n", __func__, __LINE__);
-	hash_for_each_possible(dsm_comm_htable, entry, hlink, (long) tx_id) {
-	//hash_for_each(dsm_comm_hlock, bkt, entry, hlink) {
+	hash_for_each_possible(main_htable, entry, hlink, (long) tx_id) {
+	//hash_for_each(htable_lock, bkt, entry, hlink) {
 		dsm_debug("");
 		request = &entry->request;
 		print_request(request);
@@ -185,7 +171,7 @@ int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
 		hash_del(&entry->hlink);
 	else
 		request=NULL;
-	spin_unlock(&dsm_comm_hlock);
+	spin_unlock(&htable_lock);
 
 	if(found && request->length)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
@@ -223,11 +209,6 @@ void htable_init(int local_id)
 void htable_drop_request(dsm_request_t* request)
 {
 	struct dsm_comm_hentry *entry=NULL;
-
-	BUG_ON(!request);
-
-	if(request->length)
-		kfree(request->payload);
 	entry = container_of(request, struct dsm_comm_hentry, request);
 	kfree(entry);
 }

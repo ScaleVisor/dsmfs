@@ -56,6 +56,7 @@ typedef struct dsm_request_s
 /* TODO: compact attribute? (but we have same arch? may not be enough: compiler version!? */
 }dsm_request_t;
 
+void print_request(dsm_request_t *request);/*dsm.c*/
 
 dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int central_port, char* central_ip);
 
