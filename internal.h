@@ -40,8 +40,11 @@ struct dsmfs_fs_info {
 	int server_id;//is the port
 	#define IP_MAX_SIZE 45
 	char rip[IP_MAX_SIZE];// remote ip (we need a list)
-	short rport;// remote port (we need a list)
+	int rport;// remote port (we need a list)
 	dsm_channel_t * server_channel;
+//#ifdef TEST_DSM 
+	dsm_channel_t * ktcp_server;
+//#endif
 	#define NUM_SERVER 3
 	struct task_struct *read_server[NUM_SERVER];//server thread
 	struct task_struct *write_server[NUM_SERVER];//server thread

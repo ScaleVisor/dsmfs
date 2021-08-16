@@ -63,7 +63,7 @@ enum {
 
 static const match_table_t tokens = {
 	{Opt_mode, "mode=%o"},
-	{Opt_port, "port=%i" },
+	{Opt_port, "port=%u" },//FIXME:%s
 	{Opt_ip, "ip=%s" },
 	{Opt_id, "id=%s" },
 	{Opt_err, NULL}
@@ -242,12 +242,16 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 								__func__, fsi->server_id);
 			break;
 		case Opt_port:
-			if (match_int(&args[0], &option))
-				return -EINVAL;
-			fsi->rport = (short) option;
+		{
+			char *__port = args[0].from;
+			int rc = kstrtouint(__port, 0, &fsi->rport);
+			if (rc)
+				dsm_print("%s DSMFS: error parsing port\n", __func__); 
+
 			dsm_print("%s DSMFS: PORT of the central manager: %d\n", 
 								__func__, fsi->rport);
 			break;
+		}
 		case Opt_ip:
 			dsm_print("%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);
 			//strcpy(fsi->ip, &args[0]);

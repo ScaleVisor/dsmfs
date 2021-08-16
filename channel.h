@@ -3,12 +3,23 @@
 #include <linux/fs.h>
 #include <linux/types.h>
 
+#define MAIN_NODE 0
+
+struct ktcp_cb
+{
+	struct mutex slock;
+	struct socket *socket;
+};
+
 typedef struct dsm_channel_s{
 	int id;
-	//int central_port;
-       	//char* central_ip;
+	int port;
+       	char* ip;
 	struct super_block *sb;
         struct task_struct *server_thread;
+	/* put these arg in a separate struct */
+	#define MAX_NODES 12
+	struct ktcp_cb cb_channels[MAX_NODES];
 }dsm_channel_t;
 
 //TODO: synchronize with page->dsm_copyset
@@ -26,14 +37,16 @@ enum dsm_page_access {
 enum dsm_request_type {
 	DSM_REQ_INVALIDATE = 1,
 	DSM_REQ_READ = 2,
-	DSM_REQ_WRITE = 3
+	DSM_REQ_WRITE = 3,
+	DSM_REQ_TEST = 4
 };
 
 /* Also used for response */
 typedef struct dsm_request_s
 {
 	//requester info
-	uint16_t src_id; //source node id
+	uint16_t src_id; //source node id (who built it)
+	uint16_t sender_id; //source node id
 	uint16_t tx_id; //internal to a node
 	uint8_t req_type;	//request type
 
@@ -59,6 +72,8 @@ typedef struct dsm_request_s
 void print_request(dsm_request_t *request);/*dsm.c*/
 
 dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int central_port, char* central_ip);
+
+void dsm_channel_destroy(dsm_channel_t* channel);
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request);
 

@@ -90,3 +90,8 @@ dsm_channel_t* dsm_channel_create(int local_id,
 
 	return server_channel;
 }
+
+void dsm_channel_destroy(dsm_channel_t* channel)
+{
+	kfree(channel);
+}

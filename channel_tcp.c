@@ -1,112 +1,33 @@
+#include "channel.h"
+#include "internal.h"
+#include "ktcp.h"
+#include <linux/delay.h>
+#include <linux/slab.h>
+#include <linux/kthread.h>
+#include <linux/semaphore.h>
+#include <linux/hashtable.h>
+#include <linux/jhash.h>
 
+#include <linux/net.h>
+#include <linux/inet.h>
+#include <net/sock.h>
+#include <linux/tcp.h>
+#include <linux/in.h>
+#include <asm/uaccess.h>
+#include <linux/socket.h>
+#include <linux/slab.h>
+#include <linux/delay.h>
+#include <linux/kvm_host.h>
 
-struct dsm_address {
-        const char *host;
-        char port[8];
-};
+#define tcp_printk(...) /**/
 
-#define NDSM_CONN_THREADS 1
-
-struct dsm_conn {
-        struct socket *sock;
-        struct list_head link;
-        struct task_struct *threads[NDSM_CONN_THREADS];
-};
-
-static int get_dsm_address(int server_id, struct dsm_address *addr)
-{
-        if (addr == NULL) {
-                return -EINVAL;
-        }
-
-        sprintf(addr->port, "%d", 37710 + dsm_id);
-        addr->host = "127.0.0.1"; //TODO: as a parameter of module
-
-        return 0;
-}
-
-static int ktcp_listen(const char *host, const char *port, struct socket **listen_socket)
-{
-        int ret;
-        struct sockaddr_in saddr;
-	#define DEFAULT_BACKLOG 16
-        long portdec;
-
-        ret = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, listen_socket);
-        if (ret != 0) {
-                printk(KERN_ERR "sock_create %d", ret);
-                return ret;
-        }
-        memset(&saddr, 0, sizeof(saddr));
-        saddr.sin_family = AF_INET;
-        kstrtol(port, 10, &portdec);
-        saddr.sin_port = htons(portdec);
-        saddr.sin_addr.s_addr = in_aton(host);
-
-        ret = (*listen_socket)->ops->bind(*listen_socket, (struct sockaddr *)&saddr, sizeof(saddr));
-        if (ret != 0) {
-                printk(KERN_ERR "bind %d\n", ret);
-                sock_release(*listen_socket);
-                return ret;
-        }
-
-        ret = (*listen_socket)->ops->listen(*listen_socket, DEFAULT_BACKLOG);
-        if (ret != 0) {
-                printk(KERN_ERR "listen %d\n", ret);
-                sock_release(*listen_socket);
-                return ret;
-        }
-
-        return SUCCESS;
-}
-
-int ktcp_accept(struct socket *listen_socket, struct socket **accept_socket, unsigned long flag)
-{
-        int ret;
-
-        if (listen_socket == NULL) {
-                printk(KERN_ERR "null listen_socket\n");
-                return -EINVAL;
-        }
-
-        ret = sock_create_lite(listen_socket->sk->sk_family, listen_socket->sk->sk_type,
-                        listen_socket->sk->sk_protocol, accept_socket);
-        if (ret != 0) {
-                printk(KERN_ERR "sock_create %d\n", ret);
-                return ret;
-        }
-
-re_accept:
-        ret = listen_socket->ops->accept(listen_socket, *accept_socket, flag);
-        if (ret == -ERESTARTSYS) {
-                if (kthread_should_stop())
-                        return ret;
-                goto re_accept;
-        }
-        // When setting SOCK_NONBLOCK flag, accept return this when there's nothing in waiting queue.
-        if (ret == -EWOULDBLOCK || ret == -EAGAIN) {
-                sock_release(*accept_socket);
-                *accept_socket = NULL;
-                return ret;
-        }
-        if (ret < 0) {
-                printk(KERN_ERR "accept %d\n", ret);
-                sock_release(*accept_socket);
-                *accept_socket = NULL;
-                return ret;
-        }
-
-        (*accept_socket)->ops = listen_socket->ops;
-        return SUCCESS;
-}
-
+#if 0
 static void* channel_handle_requests(void* arg)
 {
 	int ret = 0, idx;
-
-        struct dsm_request_t req;
         bool retry = false;
         char comm[TASK_COMM_LEN];
+        dsm_request_t req;
         struct socket* accept_sock = (struct socket *)data;
 
         while (1) {
@@ -136,128 +57,99 @@ out:
         }
 	return NULL;
 }
+#endif
 
-
-static void* dsm_tcp_create_server(void* arg)
+static size_t __tcp_callback(void* buffer, size_t len, char* payload, dsm_channel_t* server_channel)
 {
-        int ret;
-	int server_id
-	dsm_channel_t *server_channel;
-        struct socket *listen_sock = NULL;
-        struct socker *accept_sock = NULL;
-        struct dsm_address addr;
-        struct dsm_conn *conn;
-        struct task_struct *thread;
-        int i, count;
-        char comm[TASK_COMM_LEN];
+	dsm_request_t * req=NULL;
 
-        allow_signal(SIGKILL);
+	tcp_printk(KERN_INFO "%s:%d id %d received buffer: %ld\n", __func__, current->pid, server_channel->id, len);
 
-	server_channel = (dsm_channel_t*) arg;
-	server_id = server_channel->id;
+	req=(dsm_request_t*)buffer;
 
-        ret = get_dsm_address(server_id, &addr);
-        if (ret < 0) {
-                return ret;
-        }
+	if(!payload && req->length)
+	{
+		//ask to be called with payload!
+		tcp_printk(KERN_INFO "%s: received buffer: %ld\n", __func__, len);
+		return req->length;
+	}
 
-        ret = ktcp_listen(addr.host, addr.port, &listen_sock);
-        if (ret < 0) {
-                return (void*)(long) ret;
-        }
+	if(payload)
+	{
+		//BUG_ON(len!=PAGE_SIZE);
+		//this must be a reponse: req+page!
+		req->payload = payload;
+	}
 
-        dsm_debug_v("server[%d] started dsm server on %s:%s\n", server_id,
-                        addr.host, addr.port);
+	tcp_printk(KERN_INFO "%s: sender_id %dsrc_id %d payload size: %d\n", __func__, req->src_id, req->sender_id, req->length);
 
-        count = 0;
-        while (1) {
-                if (kthread_should_stop()) {
-                        ret = 0;
-                        goto out_listen_sock;
-                }
+	/*FIXME!!!*/
+	htable_put_request(server_channel->id /*target node*/, req->sender_id /*sender ?*/, req);
 
-                conn = kmalloc(sizeof(struct dsm_conn), GFP_KERNEL);
-                if (conn == NULL) {
-                        ret = -ENOMEM;
-                        goto out_listen_sock;
-		}
 
-                ret = ktcp_accept(listen_sock, &accept_sock, 0);
-                if (ret < 0) {
-                        /* We only exit with -ERESTARTSYS when the kthread should stop. */
-                        if (ret == -ERESTARTSYS)
-                                ret = 0;
-                        goto out_listen_sock;
-                }
-
-		printk(KERN_INFO "server: node-%d accepted connection\n", server_id);
-
-		conn->socket = accept_sock;
-
-                for (i = 0; i < NDSM_CONN_THREADS; i++) {
-                        /*
-                         * The count is somewhat meaningless since it doesn't contain
-                         * information about which remote node it connects to.
-                         */
-                        thread = kthread_run(channel_handle_requests, (void*)accept_sock, "dsm-conn/%d:%d",
-                                        server_id, count++);
-                        if (IS_ERR(thread)) {
-                                printk(KERN_ERR "kvm-dsm: failed to start kernel thread for dsm connection\n");
-                                ret = PTR_ERR(thread);
-        			ktcp_release(accept_sock);
-                                goto out_listen_sock;
-                        }
-                        conn->threads[i] = thread;
-                }
-                list_add_tail(&conn->link, &conn_list);
-        }
-
-out_listen_sock:
-        while (!list_empty(&conn_list)) {
-                conn = list_first_entry(&conn_list, struct dsm_conn, link);
-                list_del(&conn->link);
-                for (i = 0; i < NDSM_CONN_THREADS; i++) {
-                        get_task_comm(comm, conn->threads[i]);
-                        send_sig(SIGKILL, conn->threads[i], 1);
-                        ret = kthread_stop(conn->threads[i]);
-                        dsm_debug("kvm[%d] dsm connection thread %s exited with %d",
-                                        server_id, comm, ret);
-                }
-                ktcp_release(conn->sock);
-                kfree(conn);
-        }
-
-        ktcp_release(listen_sock);
-
-        return (void*) (long)ret;
+	return 0;//next_size == 0
 }
 
-void dsm_channel_init(int local_id)
+dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int port, char* ip)
 {
 
-}
-
-dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int central_port, char* central_ip)
-{
-
+	/*
 	dsm_channel_t *server_channel = kmalloc(sizeof(dsm_channel_t), GFP_KERNEL);
 	server_channel->id=server_id;
 	server_channel->sb=sb;
-	//server_channel->central_port=central_port;
-	//server_channel->central_ip=central_port;
-	
-        server_channel->server_thread = kthread_run(dsm_tcp_create_server, (void*)server_channel, "dsm-conn/%d",
-                                        server_id);
+	server_channel->port=port;
+	server_channel->ip=ip;
 
-	dsm_channel_init(server_id);
+	server_channel->server_thread = ktcp_create_server(server_channel)
 
 	return server_channel;
+	*/
+	struct handling_param_s *params;
 
+	tcp_printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip, port, __tcp_callback);
+
+	params = kzalloc(sizeof(*params), GFP_KERNEL);//TODO: embed in ... or free
+	params->callback = __tcp_callback;
+	params->initial_size = sizeof(dsm_request_t);
+
+	htable_init(server_id);
+
+	return ktcp_init(server_id, sb, port, ip, params);
 }
+
+//int dsm_channel_destroy(int server_id, struct super_block *sb)
+void dsm_channel_destroy(dsm_channel_t* channel)
+{
+	//ktcp_destroy(...) TODO
+	return;
+}
+
 
 int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm_request_t* request)
 {
-	printk(KERN_INFO "%s: No yet implemented", __func__);
+	int ret;
+	//mm_segment_t oldmm;
+	size_t buffer_size;
+	char *local_buffer;
+
+	request->sender_id = server_channel->id;
+
+	buffer_size = sizeof(*request)+request->length;
+	local_buffer = kzalloc(buffer_size, GFP_KERNEL);
+	if (!local_buffer) {
+		return -ENOMEM;
+	}
+
+	memcpy(local_buffer, request, sizeof(*request));
+	memcpy(local_buffer + sizeof(*request), request->payload, request->length);
+
+	tcp_printk(KERN_INFO "%s: this %d target_id %d payload size: %d\n", __func__, server_channel->id, target_node, request->length);
+
+	ret = ktcp_send(target_node, local_buffer, buffer_size, server_channel);
+
+	//int ktcp_send(int target_node_id, const char *buffer, size_t length, dsm_channel_t* server_channel)
+
+	return ret < 0 ? ret : buffer_size;
 
 }
 
@@ -265,11 +157,12 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 {
 	/* should be called by dsm servers only? */
 	int ret = 0;
-	BUG_ON(tx_id!=-1);
 	dsm_request_t * req=NULL;
+	BUG_ON(tx_id!=-1);
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
 		ret=htable_get_request(server_channel->id, req_type, &req);
+		dsm_debug("server_id %d tx_id %d got request\n", server_channel->id, tx_id);
 	}while(!ret && req==NULL); 
 
 	*request=req;
@@ -281,8 +174,8 @@ int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** requ
 {
 	/* req_type ignored for now */
 	int ret = 0;
-	BUG_ON(tx_id==-1);
 	dsm_request_t * req=NULL;
+	BUG_ON(tx_id==-1);
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
 		ret = htable_get_response(server_channel->id, tx_id, &req);
@@ -295,5 +188,9 @@ int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** requ
 
 void dsm_drop_request(dsm_request_t* request)
 {
-	printk(KERN_INFO "%s: No yet implemented", __func__);
+
+	BUG_ON(!request);
+	if(request->length)
+		kfree(request->payload);
+	htable_drop_request(request);
 }
