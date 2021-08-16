@@ -9,6 +9,9 @@
 #include <linux/rmap.h>
 #include <linux/mmu_notifier.h>
 
+int define_event(int is_not_read){
+	return is_not_read ? MMU_NOTIFY_UNMAP : MMU_NOTIFY_PROTECTION_PAGE
+}
 static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 			    unsigned long address, void *arg)
 {
@@ -17,12 +20,18 @@ static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 	spinlock_t *ptl;
 	int ret = 0;
 	int clear_read = (int) (long)arg;
-
+	struct mmu_notifier_range range;
 	dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
-
+	
 	pte = page_check_address(page, mm, address, &ptl, 1);
 	if (!pte)
 		goto out;
+	
+	//INIT MEMORY NOTIFIER RANGE
+	mmu_notifier_range_init(&range, define_event(clear_read),
+				0, vma, mm, address,vma_address_end(page, vma));
+
+	mmu_notifier_invalidate_range_start(&range);
 
 	if (pte_write(*pte) || pte_present(*pte)) {
 		pte_t entry;
@@ -41,7 +50,8 @@ static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 	}
 
 	pte_unmap_unlock(pte, ptl);
-
+	mmu_notifier_invalidate_range_end(&range);
+/* 
 	if (ret) {
 		if(!clear_read){
 			mmu_notifier_write_protect_page(mm, address);		
@@ -50,11 +60,10 @@ static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 			mmu_notifier_invalidate_page(mm, address);
 			//printk(KERN_DEBUG "ZAP COUNT %ld", ++zapcounter);
 		}
-	}
+	} */
 out:
 	return SWAP_AGAIN;
 }
-
 static bool dsm_invalid_unmap_vma(struct vm_area_struct *vma, void *arg)
 {
 	dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
