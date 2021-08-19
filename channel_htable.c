@@ -13,9 +13,7 @@
 #include <linux/hashtable.h>
 #include <linux/jhash.h>
 
-#define __BLOCKED_HASH_BITS	7
-static DEFINE_HASHTABLE(main_htable, __BLOCKED_HASH_BITS);
-static DEFINE_SPINLOCK(htable_lock);
+void print_request(dsm_request_t *request);
 
 struct dsm_comm_hentry
 {
@@ -24,34 +22,28 @@ struct dsm_comm_hentry
 	struct hlist_node hlink;
 };
 
-void print_request(dsm_request_t *request);
-
-#define MAX_SEMA 12+1
-struct semaphore dsm_request_semaphores[MAX_SEMA][DSM_REQ_NUM];
-struct semaphore dsm_response_semaphores[MAX_SEMA];
-		
-static void sema_up(int sema_id, int response, int req_type)
+static void sema_up(channel_htable_t *htable, int sema_id, int response, int req_type)
 {
 	dsm_debug("sema %d is it a response? %d, req_type %d\n", sema_id, response, req_type);
 	BUG_ON(sema_id>MAX_SEMA);
 
 	if(response)
-		up(&dsm_response_semaphores[sema_id]);
+		up(&htable->dsm_response_semaphores[sema_id]);
 	else
-		up(&dsm_request_semaphores[sema_id][req_type-1]);
+		up(&htable->dsm_request_semaphores[sema_id][req_type-1]);
 }
 
-static int sema_down(int sema_id, int response, int req_type)
+static int sema_down(channel_htable_t *htable, int sema_id, int response, int req_type)
 {
 	dsm_debug("sema %d is it a response? %d, req_type %d\n", sema_id, response, req_type);
 
 	if(response)
-		return down_interruptible(&dsm_response_semaphores[sema_id]);
+		return down_interruptible(&htable->dsm_response_semaphores[sema_id]);
 	else
-		return down_interruptible(&dsm_request_semaphores[sema_id][req_type-1]);
+		return down_interruptible(&htable->dsm_request_semaphores[sema_id][req_type-1]);
 }
 
-int htable_put_request(int target_id, int local_id, dsm_request_t *request)
+int htable_put_request(channel_htable_t *htable, int target_id, int local_id, dsm_request_t *request)
 {
 	int src_id;
  	struct dsm_comm_hentry *entry;
@@ -63,22 +55,22 @@ int htable_put_request(int target_id, int local_id, dsm_request_t *request)
 	entry->request = *request;
 
 	//dsm_debug("content int0 %d\n", *((int*)(request->payload)));
-	spin_lock(&htable_lock);
-	hash_add(main_htable, &entry->hlink, request->tx_id);
-	spin_unlock(&htable_lock);
+	spin_lock(&htable->htable_lock);
+	hash_add(htable->main_htable, &entry->hlink, request->tx_id);
+	spin_unlock(&htable->htable_lock);
 	dsm_debug("");
 
 	if(local_id == src_id)	//this is a request
-		sema_up(target_id, 0, request->req_type);
+		sema_up(htable, target_id, 0, request->req_type);
 	else if (target_id != src_id)	//this is a request (forwarded)
-		sema_up(target_id, 0, request->req_type);
+		sema_up(htable, target_id, 0, request->req_type);
 	else			//this is a response
-		sema_up(target_id, 1, request->req_type);
+		sema_up(htable, target_id, 1, request->req_type);
 
 	return 0;
 }
 
-int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request_t** ret_request)
+int htable_get_request(channel_htable_t *htable, int local_id, enum dsm_request_type req_type, dsm_request_t** ret_request)
 {
 	int ret;
 	int bkt;
@@ -93,14 +85,14 @@ int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, -1);
-	ret=sema_down(local_id, 0, req_type);
+	ret=sema_down(htable, local_id, 0, req_type);
 	if(ret<0)
 		goto out_err;
 
 
-	spin_lock(&htable_lock);
-	//hash_for_each_possible(main_htable, entry, hlink, (long) sock) {
-	hash_for_each(main_htable, bkt, entry, hlink) {
+	spin_lock(&htable->htable_lock);
+	//hash_for_each_possible(htable->main_htable, entry, hlink, (long) sock) {
+	hash_for_each(htable->main_htable, bkt, entry, hlink) {
 		request = &entry->request;
 		dsm_debug("DSMFS: %s: local_id %d tgt_id %d\n", 
 				__func__, local_id, entry->tgt_id);
@@ -116,14 +108,14 @@ int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request
 		hash_del(&entry->hlink);
 	else
 		request=NULL;
-	spin_unlock(&htable_lock);
+	spin_unlock(&htable->htable_lock);
 
 	if(found && request->length)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
 
 	if(!found)
 	{
-		sema_up(local_id, 0, req_type);//the request is for another thread
+		sema_up(htable, local_id, 0, req_type);//the request is for another thread
 		//msleep(1);//TODO: remove me?
 	}
 
@@ -132,7 +124,7 @@ out_err:
 	return ret;
 }
 
-int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
+int htable_get_response(channel_htable_t *htable, int local_id, int tx_id, dsm_request_t** ret_request)
 {
 	int ret;
 	int found;
@@ -146,13 +138,13 @@ int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
 
 	dsm_debug("DSMFS: %s: local_id %d sema %d\n", 
 				__func__, local_id, 0);
-	ret=sema_down(local_id, 1, -1);
+	ret=sema_down(htable, local_id, 1, -1);
 	if(ret<0)
 		goto out_err;
 
-	spin_lock(&htable_lock);
+	spin_lock(&htable->htable_lock);
 	dsm_debug("DSMFS: %s:%d\n", __func__, __LINE__);
-	hash_for_each_possible(main_htable, entry, hlink, (long) tx_id) {
+	hash_for_each_possible(htable->main_htable, entry, hlink, (long) tx_id) {
 	//hash_for_each(htable_lock, bkt, entry, hlink) {
 		dsm_debug("");
 		request = &entry->request;
@@ -171,14 +163,14 @@ int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request)
 		hash_del(&entry->hlink);
 	else
 		request=NULL;
-	spin_unlock(&htable_lock);
+	spin_unlock(&htable->htable_lock);
 
 	if(found && request->length)
 		dsm_debug("hash %d", jhash(request->payload, request->length, 0));
 
 	if(!found)
 	{
-		sema_up(local_id, 1, -1);//the request maybe for another thread
+		sema_up(htable, local_id, 1, -1);//the request maybe for another thread
 		//msleep(1);//TODO: remove me?
 	}
 
@@ -188,18 +180,16 @@ out_err:
 }
 
 
-void htable_init(int local_id)
+void htable_init(struct channel_htable_s *htable)
 {
 	int i,j;
-
-	if(local_id != 0)/* only 0 initialize the channels */
-		return;
-		
+	spin_lock_init(&htable->htable_lock);
+	hash_init(htable->main_htable);
 	for (i=0; i< MAX_SEMA; i++)
 	{
 		for (j=0; j< DSM_REQ_NUM; j++)
-			sema_init(&dsm_request_semaphores[i][j], 0);
-		sema_init(&dsm_response_semaphores[i], 0);
+			sema_init(&htable->dsm_request_semaphores[i][j], 0);
+		sema_init(&htable->dsm_response_semaphores[i], 0);
 	}
 }
 

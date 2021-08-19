@@ -44,7 +44,7 @@ static void* channel_handle_requests(void* arg)
                         goto out;
                 }
 		/* place in hash table */
-		htable_put_request(target_node, server_channel->id, request);
+		htable_put_request(server_channel->htable, target_node, server_channel->id, request);
         }
 out:
         get_task_comm(comm, current);
@@ -84,13 +84,13 @@ static size_t __tcp_callback(void* buffer, size_t len, char* payload, dsm_channe
 	tcp_printk(KERN_INFO "%s: sender_id %dsrc_id %d payload size: %d\n", __func__, req->src_id, req->sender_id, req->length);
 
 	/*FIXME!!!*/
-	htable_put_request(server_channel->id /*target node*/, req->sender_id /*sender ?*/, req);
+	htable_put_request(server_channel->htable, server_channel->id /*target node*/, req->sender_id /*sender ?*/, req);
 
 
 	return 0;//next_size == 0
 }
 
-dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int port, char* ip)
+dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int port, char ip[MAX_NODES][IP_MAX_SIZE])
 {
 
 	/*
@@ -104,6 +104,7 @@ dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int por
 
 	return server_channel;
 	*/
+	dsm_channel_t* server_channel;
 	struct handling_param_s *params;
 
 	tcp_printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip, port, __tcp_callback);
@@ -112,9 +113,13 @@ dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int por
 	params->callback = __tcp_callback;
 	params->initial_size = sizeof(dsm_request_t);
 
-	htable_init(server_id);
+	server_channel = ktcp_init(server_id, sb, port, ip, params);
 
-	return ktcp_init(server_id, sb, port, ip, params);
+	server_channel->htable = kzalloc(sizeof(struct channel_htable_s), GFP_KERNEL);
+
+	htable_init(server_channel->htable);
+
+	return server_channel;
 }
 
 //int dsm_channel_destroy(int server_id, struct super_block *sb)
@@ -161,7 +166,7 @@ int dsm_channel_get_request(dsm_channel_t* server_channel, dsm_request_t** reque
 	BUG_ON(tx_id!=-1);
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
-		ret=htable_get_request(server_channel->id, req_type, &req);
+		ret=htable_get_request(server_channel->htable, server_channel->id, req_type, &req);
 		dsm_debug("server_id %d tx_id %d got request\n", server_channel->id, tx_id);
 	}while(!ret && req==NULL); 
 
@@ -178,7 +183,7 @@ int dsm_channel_get_response(dsm_channel_t* server_channel, dsm_request_t** requ
 	BUG_ON(tx_id==-1);
 	do{
 		dsm_debug("server_id %d tx_id %d\n", server_channel->id, tx_id);
-		ret = htable_get_response(server_channel->id, tx_id, &req);
+		ret = htable_get_response(server_channel->htable, server_channel->id, tx_id, &req);
 	}while(req==NULL); /* main difference with get_request : merge ? */
 
 	*request=req;

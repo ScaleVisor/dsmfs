@@ -35,14 +35,14 @@ struct dsm_conn {
 
 
 
-static int ktcp_get_address(int server_id, int base_port, struct dsm_address *addr)
+static int ktcp_get_address(int server_id, char *base_ip, int base_port, struct dsm_address *addr)
 {
         if (addr == NULL) {
                 return -EINVAL;
         }
 
         sprintf(addr->port, "%d", base_port + server_id);
-        addr->host = "127.0.0.1"; //TODO: as a parameter of module
+        addr->host = base_ip; 
 
         return 0;
 }
@@ -69,6 +69,7 @@ static int ktcp_listen(const char *host, const char *port, struct socket **liste
         saddr.sin_port = htons(portdec);
         saddr.sin_addr.s_addr = in_aton(host);
 
+	printk(KERN_INFO "Binding to host %s port %s\n", host, port);
         ret = (*listen_socket)->ops->bind(*listen_socket, (struct sockaddr *)&saddr, sizeof(saddr));
         if (ret != 0) {
                 printk(KERN_ERR "bind %d\n", ret);
@@ -231,8 +232,7 @@ static int ktcp_handle_requests(void* data)
 out:
 	kfree(buffer);
         get_task_comm(comm, current);
-        dsm_debug("kvm[%d] %s exited server loop, error %d\n",
-                                server_id, comm, ret);
+        dsm_debug("kvm[%d] %s exited server loop, error %d\n", server_channel->id, comm, ret);
 
         while (!kthread_should_stop()) {
                 set_current_state(TASK_INTERRUPTIBLE);
@@ -255,6 +255,7 @@ int ktcp_release(struct socket *conn_socket)
 static int ktcp_create_server(void* arg)
 {
         int ret;
+	char *base_ip;
 	int server_id, base_port;
 	dsm_channel_t *server_channel;
         struct socket *listen_sock = NULL;
@@ -273,8 +274,9 @@ static int ktcp_create_server(void* arg)
 	server_channel = params->server_channel;
 	server_id = server_channel->id;
 	base_port = server_channel->port;
+	base_ip = server_channel->ip;
 
-        ret = ktcp_get_address(server_id, base_port, &addr);
+        ret = ktcp_get_address(server_id, base_ip, base_port, &addr);
         if (ret < 0) {
                 return ret;
         }
@@ -356,8 +358,9 @@ out_listen_sock:
 //int ktcp_init(int server_id, ktcp_server_cb_t func)
 //{
 dsm_channel_t* ktcp_init(int server_id, struct super_block *sb, 
-		int port, char* ip, struct handling_param_s *hparam)
+		int port, char ip[MAX_NODES][IP_MAX_SIZE], struct handling_param_s *hparam)
 {
+	int i;
 	int ret=0;
         struct task_struct *thread;
 	dsm_channel_t *server_channel = kzalloc(sizeof(dsm_channel_t), GFP_KERNEL);
@@ -367,7 +370,7 @@ dsm_channel_t* ktcp_init(int server_id, struct super_block *sb,
 	server_channel->id=server_id;
 	server_channel->sb=sb;
 	server_channel->port=port;
-	server_channel->ip=ip;
+	server_channel->ip=ip[server_id];
 	//initialize the server
 	hparam->server_channel = server_channel;
 	/* ingoing channel is set by the thread server */
@@ -381,6 +384,14 @@ dsm_channel_t* ktcp_init(int server_id, struct super_block *sb,
 	}
 
 	server_channel->server_thread = thread;
+
+	for(i=0;i<MAX_NODES;i++)
+	{
+		server_channel->cb_channels[i].ip = ip[i];
+		server_channel->cb_channels[i].port = port;
+		server_channel->cb_channels[i].socket = NULL;
+		mutex_init(&server_channel->cb_channels[i].slock);
+	}
 
 	printk(KERN_ERR "%s success\n", __func__);
 
@@ -474,16 +485,17 @@ re_connect:
 	}
 
 	cb->socket = conn_socket;
-	mutex_init(&cb->slock);
 	return 0;
 }
 
 
 
-static int __open_socket(struct ktcp_cb *cb, int dest_id, int base_port)
+static int __open_socket(struct ktcp_cb *cb, int dest_id)
 {
 	int ret;
 	struct dsm_address addr;
+	char* base_ip = cb->ip;
+       	int base_port = cb->port;
 	
 	//printk(KERN_INFO "%s requested dest %d base_port %d\n", __func__, dest_id, base_port);
 
@@ -493,7 +505,7 @@ static int __open_socket(struct ktcp_cb *cb, int dest_id, int base_port)
 
 	printk(KERN_INFO "%s started dest %d base_port %d\n", __func__, dest_id, base_port);
 
-	ret = ktcp_get_address(dest_id, base_port, &addr);
+        ret = ktcp_get_address(dest_id, base_ip, base_port, &addr);
 	if (ret < 0) {
 		printk(KERN_ERR "kvm-dsm: address not configured properly for node-%d\n", dest_id);
 		return ret;
@@ -517,7 +529,7 @@ int ktcp_send(int target_node_id, const char *buffer, size_t length, dsm_channel
 	mm_segment_t oldmm;
 	struct ktcp_cb *cb;
 	cb = &server_channel->cb_channels[target_node_id];
-	ret = __open_socket(cb, target_node_id, server_channel->port);
+	ret = __open_socket(cb, target_node_id);
 	if(ret)
 		return ret;
 
@@ -569,12 +581,12 @@ static size_t __test_callback(void* __buffer, size_t len, char* payload, dsm_cha
 	return 0;//next_size == 0
 }
 
-dsm_channel_t* ktcp_init_test(int server_id, struct super_block *sb, int port, char* ip)
+dsm_channel_t* ktcp_init_test(int server_id, struct super_block *sb, int port, char ip[MAX_NODES][IP_MAX_SIZE])
 {
 	struct handling_param_s *params;
 	dsm_channel_t *server_channel;
 
-	printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip, port, __test_callback);
+	printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip[0], port, __test_callback);
 
 	params = kzalloc(sizeof(*params), GFP_KERNEL);//TODO: embed in ...
 	params->callback = __test_callback;

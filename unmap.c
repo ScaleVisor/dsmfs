@@ -19,7 +19,7 @@ static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 	int ret = 0;
 	int clear_read = (int) (long)arg;
 
-	dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
+	//dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
 
 	pte = page_check_address(page, mm, address, &ptl, 1);
 	if (!pte)
@@ -53,7 +53,7 @@ out:
 
 static bool dsm_invalid_unmap_vma(struct vm_area_struct *vma, void *arg)
 {
-	dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
+	//dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
 	return false;
 }
 

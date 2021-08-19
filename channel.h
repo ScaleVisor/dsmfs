@@ -2,23 +2,47 @@
 
 #include <linux/fs.h>
 #include <linux/types.h>
+#include <linux/semaphore.h>
+#include <linux/hashtable.h>
+#include "config.h"
 
-#define MAIN_NODE 0
+
+enum dsm_request_type {
+	DSM_REQ_INVALIDATE = 1,
+	DSM_REQ_READ = 2,
+	DSM_REQ_WRITE = 3,
+	DSM_REQ_TEST = 4,
+	DSM_REQ_NUM = 5 /* ALWAYS last*/
+};
+
+#define __BLOCKED_HASH_BITS	7
+#define MAX_SEMA MAX_NODES+1
+struct channel_htable_s {
+	spinlock_t htable_lock; //DEFINE_SPINLOCK(htable_lock);
+	DECLARE_HASHTABLE(main_htable, __BLOCKED_HASH_BITS);
+
+	struct semaphore dsm_request_semaphores[MAX_SEMA][DSM_REQ_NUM];
+	struct semaphore dsm_response_semaphores[MAX_SEMA];
+};
+typedef struct channel_htable_s channel_htable_t;
 
 struct ktcp_cb
 {
+	char *ip;
+	int port;
 	struct mutex slock;
 	struct socket *socket;
 };
 
 typedef struct dsm_channel_s{
 	int id;
+	struct super_block *sb;
+	/* input channel info */
 	int port;
        	char* ip;
-	struct super_block *sb;
         struct task_struct *server_thread;
-	/* put these arg in a separate struct */
-	#define MAX_NODES 12
+	struct channel_htable_s *htable;
+	/* ouput channel info (put these arg in a separate struct) */
 	struct ktcp_cb cb_channels[MAX_NODES];
 }dsm_channel_t;
 
@@ -32,14 +56,6 @@ enum dsm_page_access {
 	DSM_PG_REQ_WRITE
 };
 */
-
-#define DSM_REQ_NUM 3
-enum dsm_request_type {
-	DSM_REQ_INVALIDATE = 1,
-	DSM_REQ_READ = 2,
-	DSM_REQ_WRITE = 3,
-	DSM_REQ_TEST = 4
-};
 
 /* Also used for response */
 typedef struct dsm_request_s
@@ -71,7 +87,7 @@ typedef struct dsm_request_s
 
 void print_request(dsm_request_t *request);/*dsm.c*/
 
-dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int central_port, char* central_ip);
+dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int central_port, char central_ip[MAX_NODES][IP_MAX_SIZE]);
 
 void dsm_channel_destroy(dsm_channel_t* channel);
 
@@ -85,8 +101,9 @@ void dsm_drop_request(dsm_request_t* request);
 
 
 /* htable function: free to use by any channel type */
-int htable_get_request(int local_id, enum dsm_request_type req_type, dsm_request_t** ret_request);
-int htable_get_response(int local_id, int tx_id, dsm_request_t** ret_request);
-int htable_put_request(int target_id, int local_id, dsm_request_t *request);
+int htable_get_request(channel_htable_t *,int local_id, enum dsm_request_type req_type, dsm_request_t** ret_request);
+int htable_get_response(channel_htable_t* ,int local_id, int tx_id, dsm_request_t** ret_request);
+int htable_put_request(channel_htable_t *, int target_id, int local_id, dsm_request_t *request);
 void htable_drop_request(dsm_request_t* request);
-void htable_init(int local_id);
+void htable_init(channel_htable_t*);
+

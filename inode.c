@@ -138,6 +138,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		}
 #endif
 	}
+	dsm_debug("%s DSMFS: !\n", __func__);
 	return inode;
 }
 
@@ -253,11 +254,29 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 			break;
 		}
 		case Opt_ip:
-			dsm_print("%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);
-			//strcpy(fsi->ip, &args[0]);
-			//dsm_print("%s IP of the central manager: %s\n", 
-								//__func__, fsi->ip);
+		{
+			/* dsm_print("%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);*/
+			int index=0;
+			char *ip = NULL;
+			/*
+			ip = strtok(args[0].from, ",");
+			dsm_print("%s DSMFS: list of ips %s\n", __func__, args[0].from);
+			while( ip != NULL ) 
+			{
+				dsm_print("%s IP of node %d is %s\n", __func__, index, ip);
+				strlcpy(fsi->rip[index++], ip, IP_MAX_SIZE);
+      				ip = strtok(NULL, ",");
+   			}*/
+			while ((ip = strsep(&args[0].from, ";")) != NULL) {
+        			if (*ip == '\0') continue;
+				dsm_print("%s IP of node %d is %s\n", __func__, index, ip);
+        			//printf("%s\n", token);
+				strlcpy(fsi->rip[index], ip, IP_MAX_SIZE);
+				index++;
+    			}
+
 			break;
+		}
 		/*
 		 * We might like to report bad mount options here;
 		 * but traditionally dsmfs has ignored all mount options,
