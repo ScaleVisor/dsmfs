@@ -58,14 +58,14 @@ int dsmfs_open(struct inode *inode, struct file *file)
 }
 
 
-static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
+static unsigned int filemap_fault_wrapper(/* struct vm_area_struct *vma,  */struct vm_fault *vmf)
 {
 	int ret;
-	struct inode *inode = file_inode(vma->vm_file);
+	struct inode *inode = file_inode(vmf->vma->vm_file);
 	dsm_debug("%ld!\n", vmf->pgoff);  
 	dsm_time("Entered");
 	//dump_stack();
-	ret=filemap_fault(vma, vmf);
+	ret=filemap_fault(vmf);
 	if(vmf->page){
 		if(vmf->flags & FAULT_FLAG_WRITE)  {
 			dsmfs_upgrade_page(inode, vmf->page);	
@@ -88,11 +88,11 @@ static void filemap_map_pages_wrapper(struct fault_env *fe, pgoff_t start_pgoff,
 }
 #endif
 
-static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fault *vmf)
+static unsigned int filemap_page_mkwrite_wrapper(/* struct vm_area_struct *vma, */ struct vm_fault *vmf)
 {
 	int ret;
 	struct page *page = vmf->page;
-	struct inode *inode = file_inode(vma->vm_file);
+	struct inode *inode = file_inode(vmf->vma->vm_file);
 
 	dsm_debug("%ld!\n", page->index*PAGE_SIZE);  
 	dsm_time("Entered");
@@ -100,7 +100,7 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 	//dump_stack();
 
 
-	ret=filemap_page_mkwrite(vma, vmf);
+	ret=filemap_page_mkwrite(/* vma, */ vmf);
 	if(ret==VM_FAULT_LOCKED){
 		if(vmf->flags & FAULT_FLAG_WRITE) {
 			dsmfs_upgrade_page(inode, page);	

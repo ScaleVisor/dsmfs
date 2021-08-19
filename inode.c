@@ -103,7 +103,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 
 	if (inode) {
 		inode->i_ino = dsmfs_get_next_ino(sb);//get_next_ino();
-		inode_init_owner(inode, dir, mode);
+		inode_init_owner(&init_user_ns,inode, dir, mode);
 		inode->i_mapping->a_ops = &dsmfs_aops;
 		mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
 		mapping_set_unevictable(inode->i_mapping);
@@ -146,7 +146,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
  */
 /* SMP-safe */
 static int
-dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
+dsmfs_mknod(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode * inode = dsmfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
@@ -161,20 +161,20 @@ dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 	return error;
 }
 
-static int dsmfs_mkdir(struct inode * dir, struct dentry * dentry, umode_t mode)
+static int dsmfs_mkdir(struct user_namespace *mnt_userns, struct inode * dir, struct dentry * dentry, umode_t mode)
 {
-	int retval = dsmfs_mknod(dir, dentry, mode | S_IFDIR, 0);
+	int retval = dsmfs_mknod(&init_user_ns,dir, dentry, mode | S_IFDIR, 0);
 	if (!retval)
 		inc_nlink(dir);
 	return retval;
 }
 
-static int dsmfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+static int dsmfs_create(struct user_namespace *mnt_userns, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
 {
-	return dsmfs_mknod(dir, dentry, mode | S_IFREG, 0);
+	return dsmfs_mknod(&init_user_ns, dir, dentry, mode | S_IFREG, 0);
 }
 
-static int dsmfs_symlink(struct inode * dir, struct dentry *dentry, const char * symname)
+static int dsmfs_symlink(struct user_namespace *mnt_userns, struct inode * dir, struct dentry *dentry, const char * symname)
 {
 	struct inode *inode;
 	int error = -ENOSPC;
@@ -205,10 +205,22 @@ static const struct inode_operations dsmfs_dir_inode_operations = {
 	.rename		= simple_rename,
 };
 
+/*
+ * Display the mount options in /proc/mounts.
+ */
+/* static int dsmfs_show_options(struct seq_file *m, struct dentry *root)
+{
+	struct ramfs_fs_info *fsi = root->d_sb->s_fs_info;
+
+	if (fsi->mount_opts.mode != RAMFS_DEFAULT_MODE)
+		seq_printf(m, ",mode=%o", fsi->mount_opts.mode);
+	return 0;
+} */
+
 static const struct super_operations dsmfs_ops = {
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
-	.show_options	= generic_show_options,
+//	.show_options	= /* generic_show_options, */ seq_show_option,
 };
 
 
@@ -274,7 +286,7 @@ int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct inode *inode;
 	int err = 0;
 
-	save_mount_options(sb, data);
+	//save_mount_options(sb, data);
 
 	// Also allocates the inode number
 	fsi = kzalloc(sizeof(struct dsmfs_fs_info), GFP_KERNEL);
