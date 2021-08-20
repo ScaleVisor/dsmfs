@@ -43,13 +43,13 @@ static int dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 	pte_unmap_unlock(pte, ptl);
 
 	if (ret) {
-		if(!clear_read){
-			mmu_notifier_write_protect_page(mm, address);		
+		//if(!clear_read){
+		//	mmu_notifier_write_protect_page(mm, address);		
 			//printk(KERN_DEBUG "WRITE PROTECT COUNT %ld", ++counter);
-		}else{
+		//}else{
 			mmu_notifier_invalidate_page(mm, address);
 			//printk(KERN_DEBUG "ZAP COUNT %ld", ++zapcounter);
-		}
+		//}
 	}
 out:
 	return SWAP_AGAIN;
