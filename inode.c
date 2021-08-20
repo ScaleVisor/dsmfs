@@ -63,7 +63,7 @@ enum {
 
 static const match_table_t tokens = {
 	{Opt_mode, "mode=%o"},
-	{Opt_port, "port=%i" },
+	{Opt_port, "port=%u" },//FIXME:%s
 	{Opt_ip, "ip=%s" },
 	{Opt_id, "id=%s" },
 	{Opt_err, NULL}
@@ -138,6 +138,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		}
 #endif
 	}
+	dsm_debug("%s DSMFS: !\n", __func__);
 	return inode;
 }
 
@@ -242,18 +243,40 @@ static int dsmfs_parse_options(char *data, struct dsmfs_fs_info *fsi)
 								__func__, fsi->server_id);
 			break;
 		case Opt_port:
-			if (match_int(&args[0], &option))
-				return -EINVAL;
-			fsi->rport = (short) option;
+		{
+			char *__port = args[0].from;
+			int rc = kstrtouint(__port, 0, &fsi->rport);
+			if (rc)
+				dsm_print("%s DSMFS: error parsing port\n", __func__); 
+
 			dsm_print("%s DSMFS: PORT of the central manager: %d\n", 
 								__func__, fsi->rport);
 			break;
+		}
 		case Opt_ip:
-			dsm_print("%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);
-			//strcpy(fsi->ip, &args[0]);
-			//dsm_print("%s IP of the central manager: %s\n", 
-								//__func__, fsi->ip);
+		{
+			/* dsm_print("%s DSMFS: IP of central manager pinned to localhost (FIXME)\n", __func__);*/
+			int index=0;
+			char *ip = NULL;
+			/*
+			ip = strtok(args[0].from, ",");
+			dsm_print("%s DSMFS: list of ips %s\n", __func__, args[0].from);
+			while( ip != NULL ) 
+			{
+				dsm_print("%s IP of node %d is %s\n", __func__, index, ip);
+				strlcpy(fsi->rip[index++], ip, IP_MAX_SIZE);
+      				ip = strtok(NULL, ",");
+   			}*/
+			while ((ip = strsep(&args[0].from, ";")) != NULL) {
+        			if (*ip == '\0') continue;
+				dsm_print("%s IP of node %d is %s\n", __func__, index, ip);
+        			//printf("%s\n", token);
+				strlcpy(fsi->rip[index], ip, IP_MAX_SIZE);
+				index++;
+    			}
+
 			break;
+		}
 		/*
 		 * We might like to report bad mount options here;
 		 * but traditionally dsmfs has ignored all mount options,

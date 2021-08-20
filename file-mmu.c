@@ -62,7 +62,7 @@ static int filemap_fault_wrapper(struct vm_area_struct *vma, struct vm_fault *vm
 {
 	int ret;
 	struct inode *inode = file_inode(vma->vm_file);
-	dsm_debug("%ld!\n", vmf->pgoff);  
+	dsm_debug("%s %ld!\n", __func__, vmf->pgoff);  
 	dsm_time("Entered");
 	//dump_stack();
 	ret=filemap_fault(vma, vmf);
@@ -88,7 +88,7 @@ static int filemap_page_mkwrite_wrapper(struct vm_area_struct *vma, struct vm_fa
 	struct page *page = vmf->page;
 	struct inode *inode = file_inode(vma->vm_file);
 
-	dsm_debug("%ld!\n", page->index*PAGE_SIZE);  
+	dsm_debug("%s %ld!\n", __func__, page->index*PAGE_SIZE);  
 	dsm_time("Entered");
 	//printk("%s:%d %d Entered\n", __func__, __LINE__, current->pid);
 	//dump_stack();

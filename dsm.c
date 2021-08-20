@@ -12,6 +12,7 @@
  */
 
 #include "channel.h"
+#include "ktcp.h"
 #include "internal.h"
 #include "util.h"
 #include <linux/mm.h>
@@ -19,9 +20,6 @@
 #include <linux/rmap.h>
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
-
-static int main_node = 0;
-
 
 	
 #define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
@@ -31,7 +29,7 @@ static int is_owner(dsm_channel_t *channel, struct page *page)
 {
 	/*
 	 * We are also owner for the first time a page
-	 * is loaded and we are the node main_node(0).
+	 * is loaded and we are the node MAIN_NODE(0).
 	 * is 'dsm_prob_owner' set to '0' the first
 	 * arround ? We assume yes! (TO BE CHECKED!!!)
 	 * For the other times, since we pin the pages
@@ -359,7 +357,7 @@ struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int lo
 	page = find_get_page_flags(mapping, index, fgp_flags);
 
 	//node 0 should force the allocation of a new page
-	if(!page && channel->id == main_node)
+	if(!page && channel->id == MAIN_NODE)
 	{
 		BUG_ON(!locked);
 		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
@@ -406,7 +404,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	{
 		BUG_ON(request->req_type != DSM_REQ_INVALIDATE);//if we receive an invalidate we must have the page
 		dsm_debug("Forward request type %x\n", request->req_type);
-		forward_request(channel, request, main_node);
+		forward_request(channel, request, MAIN_NODE);
 		goto out;
 	}
 
@@ -490,6 +488,7 @@ int dsm_inval_server(void *data)
 {
 	return dsm_core_server(data, DSM_REQ_INVALIDATE);
 }
+//#define TEST_KTCP
 
 //TODO: the argument should be fsi ? or another specific struct
 int dsmfs_server_init(struct super_block *sb)
@@ -508,6 +507,11 @@ int dsmfs_server_init(struct super_block *sb)
 	server_channel = dsm_channel_create(server_id, sb, fsi->rport, fsi->rip);
 
 	fsi->server_channel = server_channel;
+
+#ifdef TEST_KTCP
+	fsi->ktcp_server = ktcp_init_test(server_id, sb, fsi->rport, fsi->rip); //dsm_channel_create(server_id, sb, fsi->rport, fsi->rip);
+#endif
+
 
 	dsm_debug("%s: server_id %d\n", __func__, server_channel->id);
 
@@ -544,6 +548,7 @@ void __dsmfs_server_destroy(struct task_struct* thread)
 	}
 }
 
+void ktcp_destroy_test(dsm_channel_t *server_channel);
 void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 {
 	int i;
@@ -554,4 +559,11 @@ void dsmfs_server_destroy(struct dsmfs_fs_info *fsi)
 		__dsmfs_server_destroy(fsi->write_server[i]);
 		__dsmfs_server_destroy(fsi->inval_server[i]);
 	}
+
+	//dsm_channel_destroy(fsi->server_channel);
+	//fsi->server_channel=NULL; TODO
+
+#ifdef TEST_KTCP
+	ktcp_destroy_test(fsi->ktcp_server);
+#endif
 }

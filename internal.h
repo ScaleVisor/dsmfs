@@ -1,3 +1,4 @@
+#pragma once
 /* internal.h: ramfs internal definitions
  *
  * Copyright (C) 2005 Red Hat, Inc. All Rights Reserved.
@@ -8,22 +9,21 @@
  * as published by the Free Software Foundation; either version
  * 2 of the License, or (at your option) any later version.
  */
-
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include "channel.h"
+#include "config.h"
 
-#if 0
+#if DSM_PRINT_DEBUG
 #define dsm_debug(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
 		current->pid, __func__, __LINE__, ##__VA_ARGS__)
 #else
 #define dsm_debug(fmt, ...) /**/
 #endif
 
-#define dsm_print(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt,		\
-		current->pid, __func__, __LINE__, ##__VA_ARGS__)
+#define dsm_print(fmt, ...) printk(KERN_INFO "%d:%s:%d:DSMFS " fmt, current->pid, __func__, __LINE__, ##__VA_ARGS__)
 
-#ifdef DSM_TRACE
+#if DSM_TIME
 #define dsm_time(stepname) printk(KERN_INFO "%d:%s:%d:DSMTRACE %s\n",		\
 		current->pid, __func__, __LINE__, stepname)
 //#define dsm_time(stepname) printk(KERN_INFO "%d:%s:%d:DSMTIME %s", current->pid, __func__, __LINE__, ##__VA_ARGS__)
@@ -38,10 +38,12 @@ struct dsmfs_mount_opts {
 struct dsmfs_fs_info {
 	int ino_gen;
 	int server_id;//is the port
-	#define IP_MAX_SIZE 45
-	char rip[IP_MAX_SIZE];// remote ip (we need a list)
-	short rport;// remote port (we need a list)
+	char rip[MAX_NODES][IP_MAX_SIZE];// remote ip (we need a list)
+	int rport;// remote port (we need a list)
 	dsm_channel_t * server_channel;
+//#ifdef TEST_DSM 
+	dsm_channel_t * ktcp_server;
+//#endif
 	#define NUM_SERVER 3
 	struct task_struct *read_server[NUM_SERVER];//server thread
 	struct task_struct *write_server[NUM_SERVER];//server thread
@@ -49,7 +51,7 @@ struct dsmfs_fs_info {
 	struct dsmfs_mount_opts mount_opts;
 };
 
-extern const struct inode_operations ramfs_file_inode_operations;
+//extern const struct inode_operations ramfs_file_inode_operations;
 
 int dsmfs_fill_page(struct inode *inode, struct page *page);
 
