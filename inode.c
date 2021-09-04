@@ -205,10 +205,23 @@ static const struct inode_operations dsmfs_dir_inode_operations = {
 	.rename		= simple_rename,
 };
 
+/*
+ * Display the mount options in /proc/mounts.
+ */
+static int dsmfs_show_options(struct seq_file *m, struct dentry *root)
+{
+	struct dsmfs_fs_info *fsi = root->d_sb->s_fs_info;
+
+	if (fsi->mount_opts.mode != DSMFS_DEFAULT_MODE)
+		seq_printf(m, ",mode=%o", fsi->mount_opts.mode);
+	//FIXME: more options
+	return 0;
+}
+
 static const struct super_operations dsmfs_ops = {
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
-	.show_options	= generic_show_options,
+	.show_options	= dsmfs_show_options,
 };
 
 
@@ -278,7 +291,7 @@ int dsmfs_fill_super(struct super_block *sb, void *data, int silent)
 	struct inode *inode;
 	int err = 0;
 
-	save_mount_options(sb, data);
+	//save_mount_options(sb, data); FIXME: just comment?
 
 	// Also allocates the inode number
 	fsi = kzalloc(sizeof(struct dsmfs_fs_info), GFP_KERNEL);
