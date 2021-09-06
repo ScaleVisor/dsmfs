@@ -110,8 +110,6 @@ static bool dsm_get_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 #define PageDsmValid(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_VALID)
 #define PageDsmWrite(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_WRITE)
 
-
-
 	
 #define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
 #define i_get_server_channel(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_channel)
