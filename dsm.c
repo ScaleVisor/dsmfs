@@ -31,7 +31,7 @@ struct dsm_page_state_s
 	int dsm_prob_owner;
 };
 
-static struct xarray*(struct inode)
+static struct xarray* dsm_get_inode_xarray(struct inode *inode)
 {
 	return (struct xarray*) inode->i_private;
 }
@@ -85,45 +85,27 @@ static void dsm_set_prob_owner(struct inode *inode, struct page* page, int dsm_p
 	entry->dsm_prob_owner = dsm_prob_owner;
 }
 
-static struct xarray* 
-get_page_xarray(struct inode *inode, struct page* page)
+
+static void dsm_set_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 {
 	struct xarray *xa = dsm_get_inode_xarray(inode);
-
-	struct dsm_page_state_s *entry = 
-		(struct dsm_page_state_s *) xa_load(xa, page->index);
-
-	if(!entry)
-	{
-		entry = kzalloc(sizeof(struct dsm_page_state_s), GFP_KERNEL);
-		xa_store(xa, page->index, (void*) entry, GFP_KERNEL);
-	}
-
-	BUG_ON(!entry);
-
-	return entry;
+	xa_set_mark(xa, page->index, tag);
 }
+#define SetPageDsmValid(_inode, _page) dsm_set_tag(_inode, _page, DSM_PAGE_VALID)
+#define SetPageDsmWrite(_inode, _page) dsm_set_tag(_inode, _page, DSM_PAGE_WRITE)
 
-static void dsm_set_tag(struct inode* inode, struct page* page, xa_tag_t tag)
+static void dsm_clear_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 {
 	struct xarray *xa = dsm_get_inode_xarray(inode);
-	xa_set_tag(xa, page->index, xa_tag_t tag);
-}
-#define SetPageDsmValid(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_VALID)
-#define SetPageDsmWrite(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_WRITE)
-
-static void dsm_clear_tag(struct inode* inode, struct page* page, xa_tag_t tag)
-{
-	struct xarray *xa = dsm_get_inode_xarray(inode);
-	xa_clear_tag(xa, page->index, xa_tag_t tag);
+	xa_clear_mark(xa, page->index, tag);
 }
 #define ClearPageDsmValid(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_VALID)
 #define ClearPageDsmWrite(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_WRITE)
 
-static bool dsm_get_tag(struct inode* inode, struct page* page, xa_tag_t tag)
+static bool dsm_get_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 {
 	struct xarray *xa = dsm_get_inode_xarray(inode);
-	return xa_get_tag(xa, page->index, xa_tag_t tag);
+	return xa_get_mark(xa, page->index, tag);
 }
 #define PageDsmValid(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_VALID)
 #define PageDsmWrite(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_WRITE)
@@ -356,7 +338,7 @@ inval:
 
 	/* Set prob_owner to local */
 	BUG_ON(!PageLocked(page));
-	dsm_set_prob_owner(i_get_server_id(inode));
+	dsm_set_prob_owner(inode, page, i_get_server_id(inode));
 
 	if(response)
 		dsm_drop_request(response);
