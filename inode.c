@@ -101,6 +101,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 	struct inode * inode = new_inode(sb);
 	dsm_debug("%s DSMFS: !\n", __func__);
 
+
 	if (inode) {
 		inode->i_ino = dsmfs_get_next_ino(sb);//get_next_ino();
 		inode_init_owner(inode, dir, mode);
@@ -108,6 +109,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
 		mapping_set_unevictable(inode->i_mapping);
 		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
+		inode->i_private = NULL;//FIXME: ceck it is ok
 		switch (mode & S_IFMT) {
 		default:
 			init_special_inode(inode, mode, dev);
@@ -115,6 +117,10 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		case S_IFREG:
 			inode->i_op = &dsmfs_file_inode_operations;
 			inode->i_fop = &dsmfs_file_operations;
+			struct xarray *xarr = kzalloc(sizeof(struct xarray), GFP_KERNEL);
+			xa_init(xarr);
+			inode->i_private = xarr;
+			//TODO: destroy the inode
 			break;
 		case S_IFDIR:
 			inode->i_op = &dsmfs_dir_inode_operations;
