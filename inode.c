@@ -45,6 +45,7 @@
 #include <asm/uaccess.h>
 #include "internal.h"
 #include "util.h"
+#include "inode_c_exported.h"
 
 #define DSMFS_DEFAULT_MODE	0755
 #define DSMFS_MAGIC		0x9A8458f6
@@ -86,7 +87,7 @@ static const struct address_space_operations dsmfs_aops = {
 	.readpage	= simple_readpage_wrapper,
 	.write_begin	= simple_write_begin,
 	.write_end	= simple_write_end,
-	.set_page_dirty	= __set_page_dirty_no_writeback,
+	.set_page_dirty	= __set_page_dirty_no_writeback_c,
 };
 extern const struct inode_operations dsmfs_file_inode_operations;
 
@@ -98,6 +99,7 @@ static int dsmfs_get_next_ino(struct super_block *sb)
 struct inode *dsmfs_get_inode(struct super_block *sb,
 				const struct inode *dir, umode_t mode, dev_t dev)
 {
+	struct xarray *xarr;
 	struct inode * inode = new_inode(sb);
 	dsm_debug("%s DSMFS: !\n", __func__);
 
@@ -109,7 +111,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		mapping_set_gfp_mask(inode->i_mapping, GFP_HIGHUSER);
 		mapping_set_unevictable(inode->i_mapping);
 		inode->i_atime = inode->i_mtime = inode->i_ctime = current_time(inode);
-		inode->i_private = NULL;//FIXME: ceck it is ok
+		inode->i_private = NULL;//FIXME: check it is ok
 		switch (mode & S_IFMT) {
 		default:
 			init_special_inode(inode, mode, dev);
@@ -117,7 +119,7 @@ struct inode *dsmfs_get_inode(struct super_block *sb,
 		case S_IFREG:
 			inode->i_op = &dsmfs_file_inode_operations;
 			inode->i_fop = &dsmfs_file_operations;
-			struct xarray *xarr = kzalloc(sizeof(struct xarray), GFP_KERNEL);
+			xarr = kzalloc(sizeof(struct xarray), GFP_KERNEL);//TODO: free
 			xa_init(xarr);
 			inode->i_private = xarr;
 			//TODO: destroy the inode

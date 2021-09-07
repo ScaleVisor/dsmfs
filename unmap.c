@@ -4,11 +4,34 @@
  * Written by Mohamed Lamine Karaoui <moharaka@gmail.com>, November 2020
  */
 
+
 #include "internal.h"
-//arch/x86/include/asm/pgtable.h
 #include <linux/rmap.h>
 #include <linux/mmu_notifier.h>
 #include <asm-generic/cacheflush.h>
+#include "unmap_c_exported.h"
+
+
+static inline void
+mmu_notifier_invalidate_range_start_local(struct mmu_notifier_range *range)
+{
+	might_sleep();
+
+	lock_map_acquire(&__mmu_notifier_invalidate_range_start_map);
+	if (mm_has_notifiers(range->mm)) {
+		range->flags |= MMU_NOTIFIER_RANGE_BLOCKABLE;
+		__mmu_notifier_invalidate_range_start(range);
+	}
+	lock_map_release(&__mmu_notifier_invalidate_range_start_map);
+}
+
+static inline pte_t *get_locked_pte_local(struct mm_struct *mm, unsigned long addr,
+				    spinlock_t **ptl)
+{
+	pte_t *ptep;
+	__cond_lock(*ptl, ptep = __get_locked_pte(mm, addr, ptl));
+	return ptep;
+}
 
 
 static bool dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
@@ -24,7 +47,7 @@ static bool dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 	dsm_debug("curent vma owner's pid %d\n", vma->vm_mm->owner->pid);
 
 	//pte = page_check_address(page, mm, address, &ptl, 1);
-	pte = get_locked_pte(mm, address, &ptl);
+	pte = get_locked_pte_local(mm, address, &ptl);
 	if (!pte)
 		goto out;
 
@@ -33,7 +56,7 @@ static bool dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 
 		flush_cache_page(vma, address, pte_pfn(*pte));
 		//nuke the pte: entry contains a copy of the old value
-		entry = ptep_clear_flush(vma, address, pte);
+		entry = ptep_clear_flush_p(vma, address, pte);
 		if(!clear_read)
 		{
 			/* keep the entry read only */
@@ -59,7 +82,7 @@ static bool dsm_page_unmap_one(struct page *page, struct vm_area_struct *vma,
 		mmu_notifier_range_init(&range, mmu_event,
 				0, vma, vma->vm_mm, address, address+1/* vma_address_end(page, vma) */);
 
-		mmu_notifier_invalidate_range_start(&range);//FIXME: end==start?
+		mmu_notifier_invalidate_range_start_local(&range);//FIXME: end==start?
 		dsm_debug("page cleaned %ld\n", page->index);
 	}
 out:
