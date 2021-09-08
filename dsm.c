@@ -16,16 +16,105 @@
 #include "internal.h"
 #include "util.h"
 #include <linux/mm.h>
+#include <linux/xarray.h>
 #include <linux/string.h>
 #include <linux/rmap.h>
 #include <linux/kthread.h>
 #include <linux/pagemap.h>
 
+#define DSM_PAGE_VALID	XA_MARK_0
+#define DSM_PAGE_WRITE	XA_MARK_1
+
+struct dsm_page_state_s
+{
+	copyset_t dsm_copyset;
+	int dsm_prob_owner;
+};
+
+static struct xarray* dsm_get_inode_xarray(struct inode *inode)
+{
+	return (struct xarray*) inode->i_private;
+}
+
+static struct dsm_page_state_s* 
+get_page_state(struct inode *inode, struct page* page)
+{
+	struct xarray *xa = dsm_get_inode_xarray(inode);
+
+	struct dsm_page_state_s *entry = 
+		(struct dsm_page_state_s *) xa_load(xa, page->index);
+
+	if(!entry)
+	{
+		entry = kzalloc(sizeof(struct dsm_page_state_s), GFP_KERNEL);
+		xa_store(xa, page->index, (void*) entry, GFP_KERNEL);
+	}
+
+	BUG_ON(!entry);
+
+	return entry;
+}
+
+static copyset_t dsm_get_copyset(struct inode *inode, struct page* page)
+{
+	
+	struct dsm_page_state_s *entry = get_page_state(inode, page);
+	return entry->dsm_copyset;
+
+}
+
+static int dsm_get_prob_owner(struct inode *inode, struct page* page)
+{
+	
+	struct dsm_page_state_s *entry = get_page_state(inode, page);
+	return entry->dsm_prob_owner;
+}
+
+static void dsm_set_copyset(struct inode *inode, struct page* page, copyset_t copyset)
+{
+	
+	struct dsm_page_state_s *entry = get_page_state(inode, page);
+	entry->dsm_copyset = copyset;
+
+}
+
+static void dsm_set_prob_owner(struct inode *inode, struct page* page, int dsm_prob_owner)
+{
+	
+	struct dsm_page_state_s *entry = get_page_state(inode, page);
+	entry->dsm_prob_owner = dsm_prob_owner;
+}
+
+
+static void dsm_set_tag(struct inode* inode, struct page* page, xa_mark_t tag)
+{
+	struct xarray *xa = dsm_get_inode_xarray(inode);
+	xa_set_mark(xa, page->index, tag);
+}
+#define SetPageDsmValid(_inode, _page) dsm_set_tag(_inode, _page, DSM_PAGE_VALID)
+#define SetPageDsmWrite(_inode, _page) dsm_set_tag(_inode, _page, DSM_PAGE_WRITE)
+
+static void dsm_clear_tag(struct inode* inode, struct page* page, xa_mark_t tag)
+{
+	struct xarray *xa = dsm_get_inode_xarray(inode);
+	xa_clear_mark(xa, page->index, tag);
+}
+#define ClearPageDsmValid(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_VALID)
+#define ClearPageDsmWrite(_inode, _page) dsm_clear_tag(_inode, _page, DSM_PAGE_WRITE)
+
+static bool dsm_get_tag(struct inode* inode, struct page* page, xa_mark_t tag)
+{
+	struct xarray *xa = dsm_get_inode_xarray(inode);
+	return xa_get_mark(xa, page->index, tag);
+}
+#define PageDsmValid(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_VALID)
+#define PageDsmWrite(_inode, _page) dsm_get_tag(_inode, _page, DSM_PAGE_WRITE)
+
 	
 #define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
 #define i_get_server_channel(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_channel)
 
-static int is_owner(dsm_channel_t *channel, struct page *page)
+static int is_owner(dsm_channel_t *channel, struct inode *inode, struct page *page)
 {
 	/*
 	 * We are also owner for the first time a page
@@ -38,7 +127,7 @@ static int is_owner(dsm_channel_t *channel, struct page *page)
 	 */
 	BUG_ON(!channel);
 	BUG_ON(!page);
-	return channel->id == page->dsm_prob_owner;
+	return channel->id == dsm_get_prob_owner(inode, page);
 }
 
 void print_request(dsm_request_t *request)
@@ -49,30 +138,31 @@ void print_request(dsm_request_t *request)
 	//dump_stack();
 }
 
-void dsmfs_page_iv(struct page *page)
+void dsmfs_page_iv(struct inode* inode, struct page *page)
 {
 	/* Set flags to read only */
-	ClearPageDsmValid(page);
-	ClearPageDsmWrite(page);
+	ClearPageDsmValid(inode, page);
+	ClearPageDsmWrite(inode, page);
 	dsm_debug("clear both bits %p %ld\n", page, page->index);
 }
 
-void dsmfs_page_ro(struct page *page)
+void dsmfs_page_ro(struct inode* inode, struct page *page)
 {
 	/* Set flags to read only */
-	SetPageDsmValid(page);
-	ClearPageDsmWrite(page);
+	SetPageDsmValid(inode, page);
+	ClearPageDsmWrite(inode, page);
 	//SetPagePinned(page);
 	dsm_debug("RO bits %p %ld\n", page, page->index);
 }
 
-void dsmfs_page_rw(struct page *page)
+void dsmfs_page_rw(struct inode* inode, struct page *page)
 {
 	/* Set flags to read only */
-	SetPageDsmValid(page);
-	SetPageDsmWrite(page);
+	SetPageDsmValid(inode, page);
+	SetPageDsmWrite(inode, page);
 	dsm_debug("RW bits %p %ld\n", page, page->index);
 }
+
 
 int dsmfs_fill_page(struct inode *inode, struct page *page)
 {
@@ -84,10 +174,10 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	BUG_ON(!PageLocked(page));
 
 	/* page already locked */
-	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, dsm_get_copyset(inode, page));
 
 	/* if we are already owner */
-	if(is_owner(i_get_server_channel(inode), page))
+	if(is_owner(i_get_server_channel(inode), inode, page))
 		goto out;
 
 	/* Ask owner for the page and copyset (we become owner) */
@@ -100,7 +190,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	print_request(&request);
 
 	/* Send request */
-	dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
+	dsm_channel_send_request(i_get_server_channel(inode), dsm_get_prob_owner(inode, page), &request);
 
 	dsm_debug("\n");
 	/* Wait for response */
@@ -111,8 +201,8 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	BUG_ON(response->length!=PAGE_SIZE);
 
 	/* copy copyset */
-	page->dsm_copyset = response->copyset;
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_set_copyset(inode, page, response->copyset);
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, dsm_get_copyset(inode, page));
 
 	/* Copy payload: should be a after the request structure ? */
 	dsm_debug("page %p dest %p src %p len %d\n", page, page_to_virt(page), response->payload, response->length);
@@ -124,7 +214,7 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 	/* We are the new owner */
 	BUG_ON(!PageLocked(page));
-	page->dsm_prob_owner = i_get_server_id(inode); 
+	dsm_set_prob_owner(inode, page, i_get_server_id(inode)); 
 	//inode->i_server_id;
 	//request.src_id=i_get_server_id(inode);
 
@@ -133,9 +223,9 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 
 out:
 	/* Set flags to read only */
-	dsmfs_page_ro(page);
+	dsmfs_page_ro(inode, page);
 
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, dsm_get_copyset(inode, page));
 
 	dsm_time("Exited");
 	return 0;
@@ -143,13 +233,13 @@ out:
 
 static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 {
-	copyset_t cs = page->dsm_copyset;
+	copyset_t cs = dsm_get_copyset(inode, page);
 	dsm_request_t request;
 	dsm_request_t *response;
 	int i;
 
 	/* page already locked */
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, dsm_get_copyset(inode, page));
 
 
 	/* Ask owner for the page and copyset (we become owner) */
@@ -183,7 +273,8 @@ static int __dsmfs_invalidate_page(struct inode *inode, struct page *page)
 			dsm_drop_request(response);
 			
 			//unsetting the bit in the page
-			page->dsm_copyset&=~(1<<i);
+			//page->dsm_copyset&=~(1<<i);
+			dsm_set_copyset(inode, page, dsm_get_copyset(inode, page) & ~(1 << i));//FIXME: get and set perf issues
 		}
 	}
 
@@ -202,9 +293,9 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	BUG_ON(!PageLocked(page));
 
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index,  dsm_get_copyset(inode, page));
 	/* if we are already owner */
-	if(is_owner(i_get_server_channel(inode), page))
+	if(is_owner(i_get_server_channel(inode), inode, page))
 		goto inval;
 
 	/* Ask owner for the page and copyset (we become owner) */
@@ -219,7 +310,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	dsm_debug("");
 	/* Send request */
-	dsm_channel_send_request(i_get_server_channel(inode), page->dsm_prob_owner, &request);
+	dsm_channel_send_request(i_get_server_channel(inode), dsm_get_prob_owner(inode, page), &request);
 
 	dsm_debug("");
 	/* Wait for response */
@@ -229,23 +320,23 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	BUG_ON(response->length!=PAGE_SIZE);
 
 	/* copy copyset */
-	page->dsm_copyset = response->copyset;
+	dsm_set_copyset(inode, page, response->copyset);
 
 	/* Copy payload */
 	memcpy(page_to_virt(page), response->payload, PAGE_SIZE);
 
 inval:
 	dsm_debug("calling inval");
-	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, page->dsm_copyset);
+	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, dsm_get_copyset(inode, page));
 	/* invalidate all other copies */
 	__dsmfs_invalidate_page(inode, page);
 
 	/* Set flags to read only */
-	dsmfs_page_rw(page);
+	dsmfs_page_rw(inode, page);
 
 	/* Set prob_owner to local */
 	BUG_ON(!PageLocked(page));
-	page->dsm_prob_owner = i_get_server_id(inode);
+	dsm_set_prob_owner(inode, page, i_get_server_id(inode));
 
 	if(response)
 		dsm_drop_request(response);
@@ -289,50 +380,56 @@ int forward_request(dsm_channel_t* channel, dsm_request_t *request, int target_n
 	return 0;
 }
 
-void send_response(dsm_channel_t* channel, dsm_request_t *request, struct page* page)
+void send_response(dsm_channel_t* channel, dsm_request_t *request, struct inode* inode, struct page* page)
 {
 	dsm_request_t response;
 	response = *request;
 	response.length=PAGE_SIZE;
 	response.payload=page_to_virt(page);
-	response.copyset=page->dsm_copyset;
+	response.copyset=dsm_get_copyset(inode, page);
 	dsm_channel_send_request(channel, request->src_id, &response);
 }
 
-int __handle_read(dsm_request_t *request, struct page* page, dsm_channel_t *channel)
+int __handle_read(dsm_request_t *request, struct inode* inode, struct page* page, dsm_channel_t *channel)
 {
 	dsm_debug("Handle read request\n");
 
-	page->dsm_copyset |= (1 << channel->id); 
+	dsm_set_copyset(inode, page, dsm_get_copyset(inode, page) | (1 << channel->id));
 
 	/* We must be owner and so have a valid page */
-	BUG_ON(!PageDsmValid(page));
+	BUG_ON(!PageDsmValid(inode, page));
 
-	if(PageDsmWrite(page))
+	if(PageDsmWrite(inode, page))
 	{
 		drop_write_permission(page);
 	}
 
 	//set flag to read only
-	dsmfs_page_ro(page);
+	dsmfs_page_ro(inode, page);
 	return 0;
 }
 
-int __handle_write(dsm_request_t *request, struct page* page, dsm_channel_t *channel)
+int __handle_write(dsm_request_t *request, struct inode* inode, struct page* page, dsm_channel_t *channel)
 {
 
 	dsm_debug("Handle write request\n");
 
-	page->dsm_copyset &= ~(1 << channel->id); //we are dropping all permissions! no need to receive inval
+	//page->dsm_copyset &= ~(1 << channel->id); //we are dropping all permissions! no need to receive inval
+	dsm_set_copyset(inode, page, dsm_get_copyset(inode, page) & ~(1 << channel->id));
 
 	drop_all_permission(page);
 
 	//set flag to invalid
-	dsmfs_page_iv(page);
+	dsmfs_page_iv(inode, page);
 	return 0;
 }
 
-struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int locked)
+struct inode_page_s{
+	struct inode *inode;
+	struct page *page;
+};
+
+int dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int locked, struct inode_page_s* ip)
 {
 	int index;
 	int fgp_flags;
@@ -363,22 +460,26 @@ struct page* dsm_get_page(dsm_request_t* request, dsm_channel_t *channel, int lo
 		fgp_flags|=FGP_CREAT;//main_nde must have the page or allocate it
 		page = find_get_page_flags(mapping, index, fgp_flags);
 		BUG_ON(!page);
-		dsmfs_page_ro(page);//default rights
+		dsmfs_page_ro(inode, page);//default rights
 	}
 	if(locked)
-		dsm_debug("locked page index %d owner %d\n", index, page->dsm_prob_owner);
+		dsm_debug("locked page index %d owner %d\n", index, dsm_get_prob_owner(inode, page));
 	//BUG_ON(!page);
 	//FIXME: here? yes, we have a refcount on the page it is enough?!
 	//iput(inode);
-	return page;
+	//return page;
+	
+	ip->page=page;
+	ip->inode=inode;
+	return 0;
 }
 
-void dsm_release_page(struct page *page, int locked)
+void dsm_release_page(struct inode* inode, struct page *page, int locked)
 {
 	//put_page(page);//FIXME: should we not lock the page
 	if(locked)
 	{
-		dsm_debug("unlocked page index %ld owner %d\n", page->index, page->dsm_prob_owner);
+		dsm_debug("unlocked page index %ld owner %d\n", page->index, dsm_get_prob_owner(inode, page));
 		unlock_page(page);
 	}
 }
@@ -388,6 +489,9 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	int ret = 0;
 	int locked;
 	struct page *page;
+	struct inode *inode;
+	struct inode_page_s ip;
+
 	if(request->req_type == DSM_REQ_READ)
 		dsm_time("Entered READ");
 	else if(request->req_type == DSM_REQ_WRITE)
@@ -398,7 +502,9 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	print_request(request);
 	
 	locked = !(request->req_type == DSM_REQ_INVALIDATE);//inval does not lock page
-	page = dsm_get_page(request, channel, locked);
+	dsm_get_page(request, channel, locked, &ip);
+	page=ip.page;
+	inode=ip.inode;
 
 	if(!page)
 	{
@@ -411,43 +517,43 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	if(request->req_type == DSM_REQ_INVALIDATE)
 	{
 		dsm_debug("Handle invalidate request %x\n", request->req_type);
-		BUG_ON(is_owner(channel, page));
+		BUG_ON(is_owner(channel, inode, page));
 		drop_all_permission(page);
-		dsmfs_page_iv(page);
+		dsmfs_page_iv(inode, page);
 		dsm_channel_send_request(channel, request->src_id, request);
 	}else
 	{ 	
 		BUG_ON(!PageLocked(page));
 
 		/* read/write */
-		if(is_owner(channel, page))
+		if(is_owner(channel, inode, page))
 		{
 			dsm_debug("Handle read/write request %x\n", request->req_type);
 			if(request->req_type == DSM_REQ_READ)
-				ret = __handle_read(request, page, channel);
+				ret = __handle_read(request, inode, page, channel);
 			else
-				ret = __handle_write(request, page, channel);
+				ret = __handle_write(request, inode, page, channel);
 
 			/*** common code to read/write ***/
 			/* send page and copyset */
 			//request->copyset=page->dsm_copyset;
 			/* set probabable owner */
 			BUG_ON(!PageLocked(page));
-			page->dsm_prob_owner = request->src_id;
+			dsm_set_prob_owner(inode, page, request->src_id);
 			/* send page */
-			send_response(channel, request, page);
+			send_response(channel, request, inode, page);
 		}else
 		{
 			dsm_debug("Forward request type %x\n", request->req_type);
-			BUG_ON(page->dsm_prob_owner == request->src_id); /* forward to local node ?*/
+			BUG_ON(dsm_get_prob_owner(inode, page) == request->src_id); /* forward to local node ?*/
 			/* forward request */
-			forward_request(channel, request, page->dsm_prob_owner);
+			forward_request(channel, request, dsm_get_prob_owner(inode, page));
 			/* set probabable owner */
 			BUG_ON(!PageLocked(page));
-			page->dsm_prob_owner = request->src_id;
+			dsm_set_prob_owner(inode, page, request->src_id);
 		}
 	}
-	dsm_release_page(page, locked);
+	dsm_release_page(inode, page, locked);
 out:
 	dsm_time("Exited");
 	return ret;
