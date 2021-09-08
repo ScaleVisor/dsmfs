@@ -281,6 +281,8 @@ static int ktcp_create_server(void* arg)
                 return ret;
         }
 
+	INIT_LIST_HEAD(&conn_list);
+
         ret = ktcp_listen(addr.host, addr.port, &listen_sock);
         if (ret < 0) {
                 return ret;
