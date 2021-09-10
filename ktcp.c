@@ -490,8 +490,6 @@ re_connect:
 	return 0;
 }
 
-
-
 static int __open_socket(struct ktcp_cb *cb, int dest_id)
 {
 	int ret;
@@ -523,7 +521,6 @@ static int __open_socket(struct ktcp_cb *cb, int dest_id)
 			-1, dest_id, addr.host, addr.port);
 	return 0;
 }
-
 
 int ktcp_send(int target_node_id, const char *buffer, size_t length, dsm_channel_t* server_channel)
 {
