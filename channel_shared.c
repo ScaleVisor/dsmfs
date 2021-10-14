@@ -76,18 +76,15 @@ void dsm_drop_request(dsm_request_t* request)
 }
 
 struct channel_htable_s *htable;/* shared pointer */
-dsm_channel_t* dsm_channel_create(int local_id,
-					struct super_block *sb,
-					int central_port,
-					char* central_ip)
+dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int port, char ip[MAX_NODES][IP_MAX_SIZE])
 {
 	dsm_channel_t *server_channel = kmalloc(sizeof(dsm_channel_t), GFP_KERNEL);
-	server_channel->id=local_id;
+	server_channel->id=server_id;
 	server_channel->sb=sb;
 	//TODO: central_port
 	//TODO: central_ip
 
-	if(local_id==MAIN_NODE) /* initialized by main node == 0 (first)*/
+	if(server_id==MAIN_NODE) /* initialized by main node == 0 (first)*/
 	{
 		htable = kzalloc(sizeof(struct channel_htable_s), GFP_KERNEL);
 		htable_init(htable);

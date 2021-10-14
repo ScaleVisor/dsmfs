@@ -25,7 +25,8 @@ function generate_one()
 }
 
 #generate unmap_c_exported.h
-function_to_export="ptep_clear_flush rmap_walk __mmu_notifier_invalidate_range_start __get_locked_pte"
+#function_to_export="ptep_clear_flush rmap_walk __mmu_notifier_invalidate_range_start __get_locked_pte"
+function_to_export="ptep_clear_flush rmap_walk __mmu_notifier_invalidate_range __get_locked_pte"
 template_file="unmap_c_exported_template.h"
 target_file="unmap_c_exported.h"
 generate_one "$function_to_export" "$template_file" "$target_file"

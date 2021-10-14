@@ -64,7 +64,7 @@ enum {
 
 static const match_table_t tokens = {
 	{Opt_mode, "mode=%o"},
-	{Opt_port, "port=%u" },//FIXME:%s
+	{Opt_port, "port=%u" },
 	{Opt_ip, "ip=%s" },
 	{Opt_id, "id=%s" },
 	{Opt_err, NULL}
@@ -81,11 +81,38 @@ static int simple_readpage_wrapper(struct file *file, struct page *page)
 	return ret;
 }
 
+void dsm_notify_access_page(struct inode *inode, struct page *page, int write);
+static int simple_write_begin_wrapper(struct file *file, struct address_space *mapping,
+			loff_t pos, unsigned len, unsigned flags,
+			struct page **pagep, void **fsdata)
+			//(struct file *file, struct page *page)
+{
+	int ret;
+	struct page *page;
+	struct inode *inode;
+
+	ret=simple_write_begin(file, mapping, pos, len, flags, pagep, fsdata);
+	if(!ret)
+	{
+		page = *pagep;
+		//update dsmfs private data: writen pages are valid in node 0
+		inode = page->mapping->host;
+		dsm_debug("%s DSMFS: inode %ld  page %p, %ld, %p\n", 
+				__func__, inode->i_ino, page, page->index, page->mapping);
+		dsm_notify_access_page(inode, page, 1);
+	}else
+		dsm_debug("%s DSMFS: error %d\n", __func__, ret); 
+
+	//dsmfs_upgrade_page(pagep->mapping->host, page); moved to fault ?
+	
+	return ret;
+}
+
 static const struct address_space_operations dsmfs_aops = {
 	/* To explore for freeing some pages ........... *
 	 * .writepage, writepages, releasepage, freepage */
 	.readpage	= simple_readpage_wrapper,
-	.write_begin	= simple_write_begin,
+	.write_begin	= simple_write_begin_wrapper,
 	.write_end	= simple_write_end,
 	.set_page_dirty	= __set_page_dirty_no_writeback_c,
 };

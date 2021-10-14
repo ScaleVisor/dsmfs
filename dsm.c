@@ -89,6 +89,7 @@ static void dsm_set_prob_owner(struct inode *inode, struct page* page, int dsm_p
 static void dsm_set_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 {
 	struct xarray *xa = dsm_get_inode_xarray(inode);
+	get_page_state(inode, page);//allocate entry if missing
 	xa_set_mark(xa, page->index, tag);
 }
 #define SetPageDsmValid(_inode, _page) dsm_set_tag(_inode, _page, DSM_PAGE_VALID)
@@ -113,6 +114,8 @@ static bool dsm_get_tag(struct inode* inode, struct page* page, xa_mark_t tag)
 	
 #define i_get_server_id(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_id)
 #define i_get_server_channel(__inode) (((struct dsmfs_fs_info*)__inode->i_sb->s_fs_info)->server_channel)
+
+
 
 static int is_owner(dsm_channel_t *channel, struct inode *inode, struct page *page)
 {
@@ -144,6 +147,9 @@ void dsmfs_page_iv(struct inode* inode, struct page *page)
 	ClearPageDsmValid(inode, page);
 	ClearPageDsmWrite(inode, page);
 	dsm_debug("clear both bits %p %ld\n", page, page->index);
+	printk(KERN_INFO "%d: page iv %ld %p %ld %p\n", ((struct dsmfs_fs_info*) inode->i_sb->s_fs_info)->server_id, 
+			page->mapping->host->i_ino,
+			page, page->index, page_to_virt(page));
 }
 
 void dsmfs_page_ro(struct inode* inode, struct page *page)
@@ -153,6 +159,9 @@ void dsmfs_page_ro(struct inode* inode, struct page *page)
 	ClearPageDsmWrite(inode, page);
 	//SetPagePinned(page);
 	dsm_debug("RO bits %p %ld\n", page, page->index);
+	printk(KERN_INFO "%d: page ro %ld %p %ld %p\n", ((struct dsmfs_fs_info*) inode->i_sb->s_fs_info)->server_id, 
+			page->mapping->host->i_ino,
+			page, page->index, page_to_virt(page));
 }
 
 void dsmfs_page_rw(struct inode* inode, struct page *page)
@@ -161,6 +170,28 @@ void dsmfs_page_rw(struct inode* inode, struct page *page)
 	SetPageDsmValid(inode, page);
 	SetPageDsmWrite(inode, page);
 	dsm_debug("RW bits %p %ld\n", page, page->index);
+	printk(KERN_INFO "%d: page rw %ld %p %ld %p\n", ((struct dsmfs_fs_info*) inode->i_sb->s_fs_info)->server_id, 
+			page->mapping->host->i_ino,
+			page, page->index, page_to_virt(page));
+}
+
+void dsm_notify_access_page(struct inode *inode, struct page *page, int write)
+{
+	struct super_block *sb;
+	struct dsmfs_fs_info *fsi;
+
+	sb = inode->i_sb;
+	fsi = sb->s_fs_info;
+
+	if(fsi->server_id != 0)
+		return;
+
+	BUG_ON(!write);
+
+	dsmfs_page_rw(inode, page);
+	dsm_set_prob_owner(inode, page, fsi->server_id);
+	//BUG_ON(dsm_get_copyset(inode, page) != 0);
+	dsm_set_copyset(inode, page, (1 << fsi->server_id));
 }
 
 
@@ -173,12 +204,19 @@ int dsmfs_fill_page(struct inode *inode, struct page *page)
 	BUG_ON(!page);
 	BUG_ON(!PageLocked(page));
 
-	/* page already locked */
-	dsm_debug("page %p page %p inode %p index %ld copyset %d\n", page, page_to_virt(page), inode, page->index, dsm_get_copyset(inode, page));
+
+	if(PageDsmValid(inode, page)){
+		goto out;
+	}
 
 	/* if we are already owner */
 	if(is_owner(i_get_server_channel(inode), inode, page))
 		goto out;
+
+	/* page already locked */
+	dsm_debug("page %p pagevirt %p inode %p page->index %ld inode->ino %ld copyset %d\n", 
+		page, page_to_virt(page), inode, page->index, inode->i_ino, dsm_get_copyset(inode, page));
+
 
 	/* Ask owner for the page and copyset (we become owner) */
 	request.src_id=i_get_server_id(inode);
@@ -293,8 +331,12 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 
 	BUG_ON(!PageLocked(page));
 
+
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index,  dsm_get_copyset(inode, page));
 	/* if we are already owner */
+	if(PageDsmValid(inode, page) && PageDsmWrite(inode, page)){
+		goto inval;
+	}
 	if(is_owner(i_get_server_channel(inode), inode, page))
 		goto inval;
 
@@ -396,6 +438,11 @@ int __handle_read(dsm_request_t *request, struct inode* inode, struct page* page
 
 	dsm_set_copyset(inode, page, dsm_get_copyset(inode, page) | (1 << channel->id));
 
+	if(!PageDsmValid(inode, page))
+	{
+		dsm_debug("inode %ld page index %ld, copyset %x, probowner %x\n", inode->i_ino, page->index, dsm_get_copyset(inode, page), dsm_get_prob_owner(inode, page));
+
+	}
 	/* We must be owner and so have a valid page */
 	BUG_ON(!PageDsmValid(inode, page));
 
@@ -484,6 +531,8 @@ void dsm_release_page(struct inode* inode, struct page *page, int locked)
 	}
 }
 
+#define get_request_str(_request) (_request->req_type ? "READ_REQ" : "WRITE_REQ")
+
 int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 {
 	int ret = 0;
@@ -521,6 +570,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 		drop_all_permission(page);
 		dsmfs_page_iv(inode, page);
 		dsm_channel_send_request(channel, request->src_id, request);
+		dsm_set_prob_owner(inode, page, request->src_id);//really necessary?
 	}else
 	{ 	
 		BUG_ON(!PageLocked(page));
@@ -528,7 +578,7 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 		/* read/write */
 		if(is_owner(channel, inode, page))
 		{
-			dsm_debug("Handle read/write request %x\n", request->req_type);
+			dsm_debug("Handle read/write request %s %ld\n", get_request_str(request), page->index);
 			if(request->req_type == DSM_REQ_READ)
 				ret = __handle_read(request, inode, page, channel);
 			else
