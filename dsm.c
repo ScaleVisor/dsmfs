@@ -175,6 +175,7 @@ void dsmfs_page_rw(struct inode* inode, struct page *page)
 			page, page->index, page_to_virt(page));
 }
 
+#define MAIN_NODE 0
 void dsm_notify_access_page(struct inode *inode, struct page *page, int write)
 {
 	struct super_block *sb;
@@ -183,8 +184,12 @@ void dsm_notify_access_page(struct inode *inode, struct page *page, int write)
 	sb = inode->i_sb;
 	fsi = sb->s_fs_info;
 
-	if(fsi->server_id != 0)
+	if(fsi->server_id != MAIN_NODE)
+	{
+		//dsmfs_page_iv(inode, page);
+		//dsm_set_prob_owner(inode, page, MAIN_NODE);
 		return;
+	}
 
 	BUG_ON(!write);
 
@@ -335,8 +340,9 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index,  dsm_get_copyset(inode, page));
 	/* if we are already owner */
 	if(PageDsmValid(inode, page) && PageDsmWrite(inode, page)){
-		goto inval;
+		goto out;
 	}
+
 	if(is_owner(i_get_server_channel(inode), inode, page))
 		goto inval;
 
@@ -367,6 +373,7 @@ int dsmfs_upgrade_page(struct inode *inode, struct page *page)
 	/* Copy payload */
 	memcpy(page_to_virt(page), response->payload, PAGE_SIZE);
 
+	dsm_drop_request(response);
 inval:
 	dsm_debug("calling inval");
 	dsm_debug("page %p inode %p index %ld copyset %d\n", page, inode, page->index, dsm_get_copyset(inode, page));
@@ -380,9 +387,7 @@ inval:
 	BUG_ON(!PageLocked(page));
 	dsm_set_prob_owner(inode, page, i_get_server_id(inode));
 
-	if(response)
-		dsm_drop_request(response);
-
+out:
 	dsm_time("Exited");
 	return 0;
 }
@@ -594,6 +599,8 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 			send_response(channel, request, inode, page);
 		}else
 		{
+			printk(KERN_INFO "%d: forward request type %x\n", 
+				((struct dsmfs_fs_info*) inode->i_sb->s_fs_info)->server_id, request->req_type);
 			dsm_debug("Forward request type %x\n", request->req_type);
 			BUG_ON(dsm_get_prob_owner(inode, page) == request->src_id); /* forward to local node ?*/
 			/* forward request */

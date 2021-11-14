@@ -186,7 +186,9 @@ dsmfs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode * inode = dsmfs_get_inode(dir->i_sb, dir, mode, dev);
 	int error = -ENOSPC;
-	dsm_debug("%s DSMFS: %s:%ld  state %ld !\n", __func__, dentry->d_name.name, inode->i_ino, inode->i_state);
+	//dsm_debug("%s DSMFS: %s:%ld  state %ld !\n", __func__, dentry->d_name.name, inode->i_ino, inode->i_state);
+	printk(KERN_INFO "%s DSMFS: %s:%ld  state %ld  mode %x!\n", __func__, 
+			dentry->d_name.name, inode->i_ino, inode->i_state, mode);
 
 	if (inode) {
 		d_instantiate(dentry, inode);

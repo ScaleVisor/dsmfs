@@ -197,8 +197,8 @@ static int ktcp_handle_requests(void* data)
 	conn = (struct dsm_conn*) data;
         accept_sock = (struct socket *)conn->sock;
 	params = &conn->params;
-	init_size=params->initial_size;
-	server_channel=params->server_channel;
+	init_size = params->initial_size;
+	server_channel = params->server_channel;
 
 	buffer = kmalloc(init_size, GFP_KERNEL);//GFP_KERNEL?
 

@@ -19,7 +19,8 @@
 #include <linux/delay.h>
 #include <linux/kvm_host.h>
 
-#define tcp_printk(...) /**/
+//#define tcp_printk(...) /**/
+#define tcp_printk printk
 
 #if 0
 static void* channel_handle_requests(void* arg)
@@ -107,7 +108,7 @@ dsm_channel_t* dsm_channel_create(int server_id, struct super_block *sb, int por
 	dsm_channel_t* server_channel;
 	struct handling_param_s *params;
 
-	tcp_printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip, port, __tcp_callback);
+	tcp_printk(KERN_INFO "%s started ip %s port %d %p\n", __func__, ip[server_id], port, __tcp_callback);
 
 	params = kzalloc(sizeof(*params), GFP_KERNEL);//TODO: embed in ... or free
 	params->callback = __tcp_callback;
@@ -142,6 +143,7 @@ int dsm_channel_send_request(dsm_channel_t* server_channel, int target_node, dsm
 	buffer_size = sizeof(*request)+request->length;
 	local_buffer = kzalloc(buffer_size, GFP_KERNEL);
 	if (!local_buffer) {
+		tcp_printk(KERN_INFO "%s: error no local buffer available %d target_id %d payload size: %d\n", __func__, server_channel->id, target_node, request->length);
 		return -ENOMEM;
 	}
 
