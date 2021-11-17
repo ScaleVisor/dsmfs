@@ -15,7 +15,7 @@ where $ID is the id of the node;  $IP of the interface; and $BASE_PORT of the pr
 $MOUNT_POINT where to mount the filesystem.
 
 
-* Example: two mount two file system on the same machine:
+* Example: to mount two file system on the same machine:
 
 mount -t dsmfs -osize=6G,mode=1777,id=0,ip="127.0.0.1",port=37710  tmpfs /tmp/mountpoint0
 mount -t dsmfs -osize=6G,mode=1777,id=1,ip="127.0.0.1",port=37710  tmpfs /tmp/mountpoint1
