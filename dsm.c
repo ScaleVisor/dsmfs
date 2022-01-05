@@ -445,7 +445,8 @@ int __handle_read(dsm_request_t *request, struct inode* inode, struct page* page
 
 	if(!PageDsmValid(inode, page))
 	{
-		dsm_debug("inode %ld page index %ld, copyset %x, probowner %x\n", inode->i_ino, page->index, dsm_get_copyset(inode, page), dsm_get_prob_owner(inode, page));
+		dsm_debug("inode %ld page index %ld, copyset %x, probowner %x\n", 
+			inode->i_ino, page->index, dsm_get_copyset(inode, page), dsm_get_prob_owner(inode, page));
 
 	}
 	/* We must be owner and so have a valid page */
@@ -453,11 +454,12 @@ int __handle_read(dsm_request_t *request, struct inode* inode, struct page* page
 
 	if(PageDsmWrite(inode, page))
 	{
+		BUG_ON(!PageDsmValid(inode, page));
+		//set flag to read only
+		dsmfs_page_ro(inode, page);
 		drop_write_permission(page);
 	}
 
-	//set flag to read only
-	dsmfs_page_ro(inode, page);
 	return 0;
 }
 
@@ -469,10 +471,10 @@ int __handle_write(dsm_request_t *request, struct inode* inode, struct page* pag
 	//page->dsm_copyset &= ~(1 << channel->id); //we are dropping all permissions! no need to receive inval
 	dsm_set_copyset(inode, page, dsm_get_copyset(inode, page) & ~(1 << channel->id));
 
-	drop_all_permission(page);
-
 	//set flag to invalid
 	dsmfs_page_iv(inode, page);
+	drop_all_permission(page);
+
 	return 0;
 }
 
@@ -572,10 +574,9 @@ int handle_request(dsm_request_t *request, dsm_channel_t *channel)
 	{
 		dsm_debug("Handle invalidate request %x\n", request->req_type);
 		BUG_ON(is_owner(channel, inode, page));
-		drop_all_permission(page);
 		dsmfs_page_iv(inode, page);
+		drop_all_permission(page);
 		dsm_channel_send_request(channel, request->src_id, request);
-		dsm_set_prob_owner(inode, page, request->src_id);//really necessary?
 	}else
 	{ 	
 		BUG_ON(!PageLocked(page));
